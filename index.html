@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rapfi Gomoku</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <aside class="panel panel-left" id="panelLeft">
+    <div class="panel-left-head">
+      <span class="label">Moves</span>
+      <button id="leftToggle" class="icon-btn" title="Hide the move list">Hide</button>
+    </div>
+    <ol class="movelog" id="movelog"></ol>
+  </aside>
+
+  <main class="board-pane">
+    <div class="board-stack" id="boardStack">
+      <div class="evalbar" id="evalBar" title="Win chance for each side">
+        <span class="evalbar-num top" id="evalNumBlack"></span>
+        <div class="evalbar-fill" id="evalFill"></div>
+        <div class="evalbar-mid"></div>
+        <span class="evalbar-num bottom" id="evalNumWhite"></span>
+      </div>
+      <div class="board-wrap">
+        <canvas id="board" width="600" height="600"></canvas>
+      </div>
+    </div>
+    <div class="coach" id="coach">
+      <div class="coach-phase" id="coachPhase">Opening</div>
+      <div class="coach-moves">
+        <div class="coach-move prev">
+          <div class="cm-move" id="prevMove"></div>
+          <div class="cm-shape" id="prevShape"></div>
+        </div>
+        <div class="coach-move cur">
+          <div class="cm-move" id="curMove"></div>
+          <div class="cm-shape" id="curShape"></div>
+        </div>
+      </div>
+      <div class="coach-note" id="coachNote"></div>
+    </div>
+  </main>
+
+  <aside class="panel">
+    <header class="panel-head">
+      <div>
+        <h1>Gomoku</h1>
+        <p class="sub" id="engineBadge">connecting to engine&hellip;</p>
+      </div>
+      <div class="head-actions">
+        <select id="theme" aria-label="Colour theme">
+        <option value="system" selected>System</option>
+        <option value="light">Light</option>
+        <option value="dark">Dark</option>
+        </select>
+        <button id="panelToggle" class="icon-btn" title="Hide the panel">Hide</button>
+      </div>
+    </header>
+
+    <section class="status">
+      <div class="status-row">
+        <span class="stone-dot" id="turnDot"></span>
+        <span class="status-text" id="statusText">Black to move</span>
+      </div>
+      <div class="status-meta" id="statusMeta">Move 0</div>
+    </section>
+
+    <section class="group">
+      <label class="label" for="mode">Opponent</label>
+      <select id="mode">
+        <option value="ai-white" selected>Engine plays White</option>
+        <option value="ai-black">Engine plays Black</option>
+        <option value="human">Two players</option>
+        <option value="coach">Tactics: engine only advises</option>
+      </select>
+    </section>
+
+    <section class="group two-up">
+      <div>
+        <label class="label" for="level">Strength</label>
+        <select id="level">
+          <option value="0">Beginner</option>
+          <option value="25">Easy</option>
+          <option value="50">Club</option>
+          <option value="80">Strong</option>
+          <option value="100" selected>Full</option>
+        </select>
+      </div>
+      <div>
+        <label class="label" for="thinkTime">Think time</label>
+        <select id="thinkTime">
+          <option value="200">0.2 s</option>
+          <option value="500">0.5 s</option>
+          <option value="1000" selected>1 s</option>
+          <option value="3000">3 s</option>
+          <option value="10000">10 s</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="group">
+      <label class="label" for="rule">Rule</label>
+      <select id="rule">
+        <option value="freestyle" selected>Freestyle: five or more</option>
+        <option value="standard">Standard: exactly five</option>
+        <option value="renju" id="renjuOption">Renju: Black restricted</option>
+      </select>
+    </section>
+
+    <section class="group actions">
+      <button id="newGame" class="btn btn-primary">New game</button>
+      <button id="undo" class="btn">Undo</button>
+      <button id="undoAll" class="btn" title="Hold for 3 seconds to clear the board">Undo all</button>
+      <button id="hint" class="btn btn-toggle" aria-pressed="false">Hint off</button>
+    </section>
+
+    <section class="group analysis" id="analysis">
+      <div class="label">Engine</div>
+      <dl class="readout">
+        <div><dt>Depth</dt><dd id="anDepth">-</dd></div>
+        <div><dt>Eval</dt><dd id="anEval">-</dd></div>
+        <div><dt>Nodes</dt><dd id="anNodes">-</dd></div>
+        <div><dt>Speed</dt><dd id="anSpeed">-</dd></div>
+      </dl>
+      <div class="pv" id="anPv"></div>
+
+      <label class="label" for="nbest">Score my options</label>
+      <select id="nbest">
+        <option value="0" selected>Off</option>
+        <option value="3">Top 3 moves</option>
+        <option value="5">Top 5 moves</option>
+        <option value="10">Top 10 moves</option>
+        <option value="20">Top 20 moves</option>
+      </select>
+      <ol class="candidates" id="candList"></ol>
+      <div class="review" id="review"></div>
+      <button id="evalBarToggle" class="btn btn-toggle" aria-pressed="true">Evaluation bar on</button>
+    </section>
+
+    <details class="glossary">
+      <summary>Words used on this board</summary>
+      <dl>
+        <dt>four</dt><dd>Four in a line with one point that would make five. It forces a reply.</dd>
+        <dt>open four</dt><dd>A four with two completing points. It cannot be blocked, so it wins.</dd>
+        <dt>open three</dt><dd>A three that becomes an open four if it is left alone, so it has to be answered.</dd>
+        <dt>closed three</dt><dd>A three blocked on one side. It can still grow into a four.</dd>
+        <dt>fork</dt><dd>One move making two threats at once. Only one can be answered, so it wins. The usual kinds are four-three, double four and double three.</dd>
+        <dt>overline</dt><dd>Six or more in a row. It wins under freestyle, is not a win under standard, and is forbidden for Black under renju.</dd>
+        <dt>VCF</dt><dd>Victory by continuous fours: a forced win made only of fours, since each one must be answered.</dd>
+        <dt>VCT</dt><dd>Victory by continuous threats, the same idea allowing open threes as well as fours.</dd>
+        <dt>forbidden point</dt><dd>Renju only. A point Black may not play: double three, double four or overline.</dd>
+      </dl>
+    </details>
+
+    <footer class="foot">
+      <span>N new game</span><span>U undo</span><span>Shift+U hold to undo all</span><span>H hint on/off</span>
+    </footer>
+  </aside>
+  <button id="leftTab" class="panel-tab left" title="Show the move list">Moves</button>
+  <button id="panelTab" class="panel-tab" title="Show the panel">Panel</button>
+</div>
+
+<script src="local-engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

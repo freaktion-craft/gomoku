@@ -1,0 +1,705 @@
+/* Light is the default palette. Dark is applied either by the system
+   preference, unless the user has explicitly chosen light, or by an explicit
+   data-theme="dark" on the root element. Every colour the canvas draws with
+   lives here too, so the board follows the theme from one source. */
+
+:root {
+  --bg: #f4f4f2;
+  --surface: #ffffff;
+  --border: #d6d4cd;
+  --text: #1c1c1a;
+  --text-dim: #6b6b66;
+  --text-faint: #a9a7a0;
+  --accent: #2b2b28;
+  --accent-hover: #3d3d38;
+  --accent-text: #fbfbf9;
+  --focus: #7a7a72;
+
+  /* The board never grows past this, however large the window gets. */
+  --board-max: 990px;
+
+  --board: #e6e4df;
+  --grid: #9b978e;
+  --grid-edge: #6f6b63;
+  --coord: #8a867e;
+  --stone-black: #17171a;
+  --stone-black-edge: #17171a;
+  --stone-white: #fbfbf9;
+  --stone-white-edge: #8d8a83;
+  --marker: #3d3d38;
+  --win: #c0392b;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151517;
+    --surface: #1c1c1f;
+    --border: #33333a;
+    --text: #e9e9e6;
+    --text-dim: #9a9a95;
+    --text-faint: #6e6e6a;
+    --accent: #e9e9e6;
+    --accent-hover: #ffffff;
+    --accent-text: #151517;
+    --focus: #8f8f88;
+
+    --board: #26262a;
+    --grid: #4d4d55;
+    --grid-edge: #74747d;
+    --coord: #82828a;
+    --stone-black: #0c0c0f;
+    --stone-black-edge: #56565e;
+    --stone-white: #e4e4de;
+    --stone-white-edge: #9b9b94;
+    --marker: #c9c9c4;
+    --win: #d0564a;
+
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #151517;
+  --surface: #1c1c1f;
+  --border: #33333a;
+  --text: #e9e9e6;
+  --text-dim: #9a9a95;
+  --text-faint: #6e6e6a;
+  --accent: #e9e9e6;
+  --accent-hover: #ffffff;
+  --accent-text: #151517;
+  --focus: #8f8f88;
+
+  --board: #26262a;
+  --grid: #4d4d55;
+  --grid-edge: #74747d;
+  --coord: #82828a;
+  --stone-black: #0c0c0f;
+  --stone-black-edge: #56565e;
+  --stone-white: #e4e4de;
+  --stone-white-edge: #9b9b94;
+  --marker: #c9c9c4;
+  --win: #d0564a;
+
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  min-width: 340px;
+  min-height: 440px;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.app {
+  display: flex;
+  align-items: stretch;
+  height: 100vh;
+  min-width: 900px;          /* below this the panels drop under the board */
+  overflow: hidden;
+}
+
+.app > * { min-height: 0; }
+
+/* Board */
+
+.board-pane {
+  position: relative;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  min-width: 0;
+  overflow: auto;
+}
+
+.board-stack {
+  /* One size drives both the board and the bar beside it. It is clamped at both
+     ends: never below 300px, where the pane scrolls rather than squeezing the
+     board away, and never above --board-max however big the window is. */
+  --side: clamp(300px, min(calc(100% - 38px), calc(100vh - 48px)), var(--board-max));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  width: 100%;
+}
+
+.board-stack.no-eval {
+  --side: clamp(300px, min(100%, calc(100vh - 48px)), var(--board-max));
+}
+
+.board-wrap {
+  flex: none;
+  width: var(--side);
+  aspect-ratio: 1 / 1;
+}
+
+/* Evaluation bar: white grows from the bottom, black holds the rest. */
+.evalbar {
+  position: relative;
+  flex: none;
+  align-self: stretch;       /* matches the board's height, no percentage needed */
+  width: 28px;
+  min-height: 120px;
+  background: var(--stone-black);
+  border: 1px solid var(--stone-white-edge);
+  overflow: hidden;
+}
+
+.board-stack.no-eval .evalbar { display: none; }
+
+.evalbar-fill {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 50%;
+  background: var(--stone-white);
+  transition: height 0.3s ease;
+}
+
+.evalbar-mid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px dashed var(--stone-white-edge);
+  opacity: 0.7;
+}
+
+.evalbar-num {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  text-align: center;
+  font-size: 10px;
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+
+.evalbar-num.top { top: 3px; color: var(--stone-white); }
+.evalbar-num.bottom { bottom: 3px; color: var(--stone-black); }
+
+#board {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--board);
+  border: 1px solid var(--border);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+#board.locked { cursor: default; }
+
+.coach {
+  position: absolute;
+  top: 24px;                 /* lines up with the pane's own padding */
+  right: 24px;
+  max-width: min(300px, 55%);
+  padding: 8px 11px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  line-height: 1.4;
+  pointer-events: none;
+}
+
+.coach-phase {
+  font-weight: 600;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+/* The move just played sits on the right, the one before it on the left. */
+.coach-moves {
+  display: flex;
+  gap: 9px;
+  margin-top: 3px;
+}
+
+.coach-move {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.coach-move.prev { color: var(--text-dim); }
+
+.coach-move.cur {
+  padding-left: 9px;
+  border-left: 1px solid var(--border);
+}
+
+.cm-move {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.coach-move.cur .cm-move { font-weight: 600; }
+
+.cm-shape {
+  font-size: 11px;
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.coach-moves:empty { display: none; }
+
+.coach-note {
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.coach-note:empty { display: none; }
+
+@media (max-width: 760px) {
+  .coach { top: 12px; right: 12px; }
+}
+
+@media (max-width: 520px) {
+  .coach { font-size: 11px; padding: 5px 8px; max-width: 60%; }
+  .coach-moves { gap: 7px; }
+  .coach-move.cur { padding-left: 7px; }
+}
+
+/* Panel */
+
+.panel {
+  flex: 0 0 268px;
+  min-width: 268px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px 22px;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  overflow-y: auto;
+}
+
+.panel-left {
+  flex: 0 0 200px;
+  min-width: 200px;
+  gap: 10px;
+  padding: 18px 16px;
+  border-left: none;
+  border-right: 1px solid var(--border);
+  overflow: hidden;          /* the list inside does the scrolling */
+}
+
+.panel-left-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+}
+
+.panel-left .movelog {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+}
+
+/* Sections keep their natural height: without this they shrink to fit and the
+   panel squashes its contents instead of scrolling. */
+.panel > * { flex-shrink: 0; }
+
+.panel-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.panel-head h1 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+.panel-head .sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.icon-btn {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.icon-btn:hover { background: var(--bg); color: var(--text); }
+.icon-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+/* Collapsed panel leaves a tab on the right edge to bring it back. */
+.panel-tab {
+  display: none;
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  writing-mode: vertical-rl;
+  font: inherit;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-right: none;
+  padding: 12px 5px;
+  cursor: pointer;
+  z-index: 5;
+}
+
+.panel-tab:hover { color: var(--text); background: var(--bg); }
+.panel-tab:focus-visible { outline: 2px solid var(--focus); outline-offset: 1px; }
+
+.panel-tab.left {
+  right: auto;
+  left: 0;
+  border-right: 1px solid var(--border);
+  border-left: none;
+}
+
+.app.panel-collapsed > .panel:not(.panel-left) { display: none; }
+.app.panel-collapsed .panel-tab:not(.left) { display: block; }
+.app.panel-collapsed .coach { right: 40px; }
+
+.app.left-collapsed .panel-left { display: none; }
+.app.left-collapsed .panel-tab.left { display: block; }
+
+.app.panel-collapsed.left-collapsed { min-width: 0; }
+.app.panel-collapsed:not(.left-collapsed) { min-width: 560px; }
+.app.left-collapsed:not(.panel-collapsed) { min-width: 620px; }
+
+#theme {
+  flex: none;
+  width: auto;
+  padding: 4px 24px 4px 8px;
+  font-size: 12px;
+  background-position: calc(100% - 11px) 50%, calc(100% - 7px) 50%;
+}
+
+.status {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.stone-dot {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--stone-black);
+  border: 1px solid var(--stone-black-edge);
+  flex: none;
+}
+
+.stone-dot.white {
+  background: var(--stone-white);
+  border-color: var(--stone-white-edge);
+}
+
+.stone-dot.none { background: transparent; border-color: var(--border); }
+
+.status-text {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.status-meta {
+  margin-top: 5px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.group { display: flex; flex-direction: column; gap: 7px; }
+
+.label {
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+select, .btn {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 8px 10px;
+  border-radius: 0;
+  appearance: none;
+}
+
+select {
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-dim) 50%),
+                    linear-gradient(135deg, var(--text-dim) 50%, transparent 50%);
+  background-position: calc(100% - 15px) 50%, calc(100% - 10px) 50%;
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  padding-right: 28px;
+}
+
+select:focus-visible, .btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
+}
+
+.actions { flex-direction: row; flex-wrap: wrap; gap: 6px; }
+
+.btn {
+  cursor: pointer;
+  flex: 1 1 auto;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.btn:hover { background: var(--bg); }
+.btn:active { background: var(--border); }
+
+.btn:disabled {
+  color: var(--text-faint);
+  cursor: default;
+  background: var(--surface);
+}
+
+.btn-primary {
+  flex-basis: 100%;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.btn-primary:disabled { background: var(--accent); border-color: var(--accent); opacity: 0.5; }
+
+.btn-toggle[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+
+.btn-toggle[aria-pressed="true"]:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* Undo all is a press-and-hold: the fill tracks the three seconds, and the
+   button returns to its normal look the instant the press is abandoned. */
+.btn.holding {
+  background-image: linear-gradient(to right,
+    var(--border) 0 var(--hold, 0%), transparent var(--hold, 0%));
+  background-repeat: no-repeat;
+  font-variant-numeric: tabular-nums;
+}
+
+.btn.holding:hover { background-color: var(--surface); }
+
+.two-up {
+  flex-direction: row;
+  gap: 8px;
+}
+
+.two-up > div {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.two-up select { width: 100%; }
+
+.analysis[hidden] { display: none; }
+
+.readout {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3px 10px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.readout > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 2px;
+}
+
+.readout dt { color: var(--text-dim); }
+.readout dd { margin: 0; }
+
+.pv {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+  word-spacing: 2px;
+  max-height: 52px;
+  overflow-y: auto;
+}
+
+.pv:empty { display: none; }
+
+.candidates {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  max-height: 168px;
+  overflow-y: auto;
+}
+
+.candidates li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.candidates li:hover { background: var(--bg); }
+.candidates li .rank { color: var(--text-faint); min-width: 16px; }
+.candidates li .mv { font-weight: 600; min-width: 30px; }
+.candidates li .sc { margin-left: auto; }
+.candidates li .dp { color: var(--text-faint); font-size: 11px; }
+.candidates li.top .sc { font-weight: 600; }
+
+.candidates.pending { opacity: 0.45; }
+
+.review {
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+
+.review:empty { display: none; }
+
+.movelog {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 214px;
+  overflow-y: auto;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.movelog li {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.movelog li .n { color: var(--text-faint); min-width: 18px; text-align: right; }
+.movelog li .sd { color: var(--text-faint); width: 10px; }
+.movelog li.b .sd { color: var(--text); font-weight: 600; }
+.movelog li .c { color: var(--text); min-width: 30px; }
+.movelog li .ev { min-width: 44px; text-align: right; }
+.movelog li .q { margin-left: auto; font-size: 11px; color: var(--text-faint); }
+
+/* Grades stay monochrome; weight carries the signal, not colour. */
+.movelog li.g-inaccuracy .q { color: var(--text-dim); }
+.movelog li.g-mistake .q { color: var(--text); }
+.movelog li.g-blunder .q { color: var(--text); font-weight: 600; }
+
+.movelog li.last { background: var(--bg); }
+.movelog li.last .c { font-weight: 600; }
+
+.movelog:empty::after {
+  content: "No moves yet";
+  color: var(--text-faint);
+}
+
+.glossary {
+  font-size: 12px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.glossary summary {
+  cursor: pointer;
+  color: var(--text-dim);
+}
+
+.glossary dl { margin: 10px 0 0; }
+.glossary dt { font-weight: 600; margin-top: 8px; }
+.glossary dd { margin: 1px 0 0; color: var(--text-dim); line-height: 1.45; }
+
+.foot {
+  margin-top: auto;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  font-size: 11px;
+  color: var(--text-faint);
+}
+
+@media (max-width: 760px) {
+  .app { flex-direction: column; min-width: 0; height: auto; overflow: visible; }
+  .board-pane { order: 1; }
+  .panel { order: 2; }
+  .panel-left {
+    order: 3;
+    flex: 1 1 auto;
+    min-width: 0;
+    border-right: none;
+    border-top: 1px solid var(--border);
+  }
+  .panel-left .movelog { max-height: 180px; }
+  .board-pane { padding: 12px; }
+  .board-stack {
+    --side: clamp(280px, min(calc(100% - 38px), calc(100vh - 24px)), var(--board-max));
+  }
+  .board-stack.no-eval {
+    --side: clamp(280px, min(100%, calc(100vh - 24px)), var(--board-max));
+  }
+  .panel {
+    flex: 1 1 auto;
+    min-width: 0;
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+  .movelog { max-height: 132px; }
+  .candidates { max-height: 132px; }
+}

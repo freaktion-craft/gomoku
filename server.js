@@ -1,0 +1,497 @@
+/*
+ * Bridge between the browser UI and the Rapfi engine.
+ *
+ * Rapfi is a native process that speaks the Piskvork/Gomocup protocol over
+ * stdin/stdout, so a web page cannot talk to it directly. This server keeps one
+ * engine process alive, serves the UI, and exposes two endpoints:
+ *
+ *   POST /api/move    - send a position, get the engine's move back
+ *   GET  /api/events  - server-sent events carrying live search output
+ *
+ * No dependencies: node server.js
+ */
+'use strict';
+
+const http = require('http');
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
+
+const ROOT = __dirname;
+const ENGINE_DIR = path.join(ROOT, 'engine');
+const CACHE_FILE = path.join(ENGINE_DIR, 'selected-build.json');
+const PORT = Number(process.env.PORT) || 8787;
+
+/* Best instruction set first. A build the CPU cannot run dies immediately with
+   an illegal-instruction exit, which is how the vendor suggests detecting it. */
+const BUILDS = ['avx512vnni', 'avx512', 'avxvnni', 'avx2', 'sse'];
+
+const RULES = { freestyle: 0, standard: 1, renju: 4 };
+
+function exeFor(tag) {
+  return path.join(ENGINE_DIR, 'pbrain-rapfi-windows-' + tag + '.exe');
+}
+
+/* Rapfi reports search progress as
+     MESSAGE Depth 17-37 | Eval -484 | Time 1471ms | I8 J7 ...
+   and finishes with a summary line carrying Speed and Node. */
+function makeInfoCollector() {
+  const info = { depth: null, eval: null, nodes: null, speed: null, timeMs: null, pv: [] };
+  const collect = line => {
+    const m = /^MESSAGE\s+(.*)$/i.exec(line);
+    if (!m) return;
+    let sawDepth = false, pv = null;
+    for (const part of m[1].split('|').map(s => s.trim())) {
+      let f;
+      if ((f = /^Depth\s+(\S+)$/i.exec(part))) { info.depth = f[1]; sawDepth = true; }
+      else if ((f = /^Eval\s+(\S+)$/i.exec(part))) info.eval = f[1];
+      else if ((f = /^Node\s+(\S+)$/i.exec(part))) info.nodes = f[1];
+      else if ((f = /^Speed\s+(\S+)$/i.exec(part))) info.speed = f[1];
+      else if ((f = /^Time\s+(\d+)ms$/i.exec(part))) info.timeMs = Number(f[1]);
+      else if (/^[A-O]\d{1,2}(\s+[A-O]\d{1,2})*$/i.test(part)) pv = part.split(/\s+/);
+    }
+    if (sawDepth && pv) info.pv = pv;
+  };
+  return { info, collect };
+}
+
+/* ------------------------------------------------------------------ engine */
+
+class Rapfi {
+  constructor(tag) {
+    this.tag = tag;
+    this.proc = null;
+    this.buffer = '';
+    this.about = '';
+    this.listeners = [];       // line consumers, most recent first
+    this.queue = Promise.resolve();
+    this.size = 0;
+    this.rule = -1;
+  }
+
+  start() {
+    if (this.proc) return;
+    this.proc = spawn(exeFor(this.tag), [], { cwd: ENGINE_DIR });
+    this.proc.stdout.on('data', chunk => this.onData(chunk));
+    this.proc.stderr.on('data', chunk => broadcast('stderr', chunk.toString().trim()));
+    this.proc.on('exit', code => {
+      broadcast('engine', 'engine exited with code ' + code);
+      this.proc = null;
+      this.size = 0;
+      this.rule = -1;
+    });
+    this.proc.on('error', err => broadcast('engine', 'engine error: ' + err.message));
+  }
+
+  onData(chunk) {
+    this.buffer += chunk.toString();
+    let nl;
+    while ((nl = this.buffer.indexOf('\n')) >= 0) {
+      const line = this.buffer.slice(0, nl).replace(/\r$/, '').trim();
+      this.buffer = this.buffer.slice(nl + 1);
+      if (line) this.onLine(line);
+    }
+  }
+
+  onLine(line) {
+    broadcast('line', line);
+    for (const fn of this.listeners.slice()) fn(line);
+  }
+
+  send(text) {
+    if (!this.proc) throw new Error('engine is not running');
+    this.proc.stdin.write(text + '\n');
+    broadcast('sent', text);
+  }
+
+  /* Send `text`, then resolve with the first line `match` accepts. */
+  ask(text, match, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      let timer = null;
+      const listener = line => {
+        if (/^ERROR/i.test(line)) return done(null, new Error(line));
+        const hit = match(line);
+        if (hit !== undefined && hit !== null && hit !== false) done(hit, null);
+      };
+      const done = (value, err) => {
+        clearTimeout(timer);
+        const i = this.listeners.indexOf(listener);
+        if (i >= 0) this.listeners.splice(i, 1);
+        err ? reject(err) : resolve(value);
+      };
+      this.listeners.unshift(listener);
+      timer = setTimeout(() => done(null, new Error('engine timed out after ' + timeoutMs + 'ms')), timeoutMs);
+      try { this.send(text); } catch (err) { done(null, err); }
+    });
+  }
+
+  /* Serialise everything: the protocol is a single request/response stream. */
+  run(job) {
+    const next = this.queue.then(job, job);
+    this.queue = next.catch(() => {});
+    return next;
+  }
+
+  async ensureGame(size, rule) {
+    this.start();
+    if (this.size === size && this.rule === rule) return;
+    await this.ask('START ' + size, l => /^OK\b/i.test(l) || undefined, 15000);
+    this.size = size;
+    this.rule = rule;
+    this.send('INFO rule ' + rule);
+    this.send('INFO game_type 0');       // opponent is a human
+    this.send('INFO timeout_match 0');   // no whole-game clock
+    this.send('INFO max_memory ' + 512 * 1024 * 1024);
+  }
+
+  /* stones: [[x, y, color], ...] in move order, color 1 = black, 2 = white. */
+  async think(opts) {
+    const { size, rule, stones, engineColor, timeoutMs, strength } = opts;
+    await this.ensureGame(size, rule);
+
+    this.send('INFO timeout_turn ' + timeoutMs);
+    this.send('INFO strength ' + strength);
+
+    const rows = stones.map(s => s[0] + ',' + s[1] + ',' + (s[2] === engineColor ? 1 : 2));
+    const command = ['BOARD'].concat(rows, 'DONE').join('\n');
+
+    const { info, collect } = makeInfoCollector();
+
+    this.listeners.unshift(collect);
+    try {
+      const move = await this.ask(command, line => {
+        const m = /^(\d{1,2}),(\d{1,2})$/.exec(line);
+        return m ? { x: Number(m[1]), y: Number(m[2]) } : undefined;
+      }, timeoutMs + 20000);
+      return { move, info };
+    } finally {
+      const i = this.listeners.indexOf(collect);
+      if (i >= 0) this.listeners.splice(i, 1);
+    }
+  }
+
+  /* Score the best `count` placements for whoever is to move.
+     YXBOARD sets the position without asking for a move, then YXNBEST runs a
+     multi-PV search that reports each candidate as
+        MESSAGE (rank) <eval> | <depth>-<seldepth> | <pv, starting at the move>
+     and finishes by printing the best move, like an ordinary search. */
+  async analyze(opts) {
+    const { size, rule, stones, sideToMove, timeoutMs, count } = opts;
+    await this.ensureGame(size, rule);
+
+    this.send('INFO timeout_turn ' + timeoutMs);
+    this.send('INFO strength 100');
+
+    const rows = stones.map(s => s[0] + ',' + s[1] + ',' + (s[2] === sideToMove ? 1 : 2));
+    this.send(['YXBOARD'].concat(rows, 'DONE').join('\n'));
+
+    /* The plain search info is collected too: a position Rapfi resolves by
+       force skips multi-PV entirely, and its Eval is then the only value
+       available for scoring the move that led here. */
+    const { info, collect: collectInfo } = makeInfoCollector();
+
+    let current = new Map();
+    let previous = [];
+    const collectRanks = line => {
+      const m = /^MESSAGE\s+\((\d+)\)\s+(\S+)\s*\|\s*(\S+)\s*\|\s*(.+)$/i.exec(line);
+      if (!m) return;
+      const rank = Number(m[1]);
+      if (rank === 1) {
+        // Each iteration restarts at rank 1; keep the last full set in case the
+        // clock stops mid-iteration and the newest one is incomplete.
+        if (current.size) previous = Array.from(current.values());
+        current = new Map();
+      }
+      current.set(rank, {
+        rank: rank,
+        eval: m[2],
+        depth: m[3],
+        pv: m[4].trim().split(/\s+/)
+      });
+    };
+
+    const collect = line => { collectRanks(line); collectInfo(line); };
+    this.listeners.unshift(collect);
+    try {
+      const best = await this.ask('YXNBEST ' + count, line => {
+        const m = /^(\d{1,2}),(\d{1,2})$/.exec(line);
+        return m ? { x: Number(m[1]), y: Number(m[2]) } : undefined;
+      }, timeoutMs + 20000);
+
+      const latest = Array.from(current.values());
+      const candidates = (latest.length >= previous.length ? latest : previous)
+        .sort((a, b) => a.rank - b.rank);
+      return { best, candidates, info };
+    } finally {
+      const i = this.listeners.indexOf(collect);
+      if (i >= 0) this.listeners.splice(i, 1);
+    }
+  }
+
+  /* Renju forbids Black double threes, double fours and overlines, with the
+     recursive twist that a three only counts if the move completing it into an
+     open four is itself legal. Rather than re-derive that, ask the engine:
+     YXSHOWFORBID answers with the points as concatenated 4-digit xxyy groups,
+     terminated by a full stop, and always for Black whoever is to move. */
+  async forbidden(opts) {
+    const { size, rule, stones, sideToMove } = opts;
+    await this.ensureGame(size, rule);
+
+    const rows = stones.map(s => s[0] + ',' + s[1] + ',' + (s[2] === sideToMove ? 1 : 2));
+    this.send(['YXBOARD'].concat(rows, 'DONE').join('\n'));
+
+    const line = await this.ask('YXSHOWFORBID',
+      l => (/^FORBID/i.test(l) ? l : undefined), 15000);
+
+    const body = line.replace(/^FORBID\s*/i, '').replace(/\.\s*$/, '').trim();
+    const points = [];
+    for (let i = 0; i + 3 < body.length; i += 4) {
+      const x = Number(body.slice(i, i + 2));
+      const y = Number(body.slice(i + 2, i + 4));
+      if (Number.isFinite(x) && Number.isFinite(y)) points.push({ x, y });
+    }
+    return { points };
+  }
+
+  async newGame() {
+    if (!this.proc) return;
+    try {
+      await this.ask('RESTART', l => /^OK\b/i.test(l) || undefined, 10000);
+    } catch (err) {
+      // Not fatal: every move is sent as a full BOARD, so state cannot drift.
+      broadcast('engine', 'restart failed: ' + err.message);
+    }
+  }
+
+  stop() {
+    if (!this.proc) return;
+    try { this.send('END'); } catch (e) { /* already gone */ }
+    const proc = this.proc;
+    setTimeout(() => { try { proc.kill(); } catch (e) {} }, 500);
+    this.proc = null;
+  }
+}
+
+/* ----------------------------------------------------------- build probing */
+
+function probeBuild(tag) {
+  return new Promise(resolve => {
+    if (!fs.existsSync(exeFor(tag))) return resolve(null);
+    let out = '', settled = false;
+    const proc = spawn(exeFor(tag), [], { cwd: ENGINE_DIR });
+    const finish = ok => {
+      if (settled) return;
+      settled = true;
+      try { proc.stdin.write('END\n'); proc.kill(); } catch (e) {}
+      resolve(ok ? (/name="[^"]*"[^\n]*/.exec(out) || [''])[0] || 'ok' : null);
+    };
+    proc.stdout.on('data', d => {
+      out += d.toString();
+      if (/^OK\b/m.test(out)) finish(true);
+    });
+    proc.on('error', () => finish(false));
+    proc.on('exit', () => finish(false));
+    setTimeout(() => finish(false), 10000);
+    proc.stdin.write('ABOUT\nSTART 15\n');
+  });
+}
+
+async function selectBuild() {
+  try {
+    const cached = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+    if (cached && cached.tag && fs.existsSync(exeFor(cached.tag))) return cached;
+  } catch (e) { /* no cache yet */ }
+
+  for (const tag of BUILDS) {
+    process.stdout.write('  probing ' + tag + ' ... ');
+    const about = await probeBuild(tag);
+    console.log(about ? 'works' : 'not supported by this CPU');
+    if (about) {
+      const picked = { tag, about };
+      try { fs.writeFileSync(CACHE_FILE, JSON.stringify(picked, null, 2)); } catch (e) {}
+      return picked;
+    }
+  }
+  return null;
+}
+
+/* -------------------------------------------------------------------- http */
+
+const sseClients = new Set();
+
+function broadcast(kind, text) {
+  if (!text) return;
+  const payload = 'data: ' + JSON.stringify({ kind, text }) + '\n\n';
+  for (const res of sseClients) {
+    try { res.write(payload); } catch (e) { sseClients.delete(res); }
+  }
+}
+
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.ico': 'image/x-icon'
+};
+
+function serveStatic(req, res) {
+  const rel = decodeURIComponent(req.url.split('?')[0]);
+  const file = path.join(ROOT, rel === '/' ? 'index.html' : rel);
+  if (!file.startsWith(ROOT + path.sep) && file !== path.join(ROOT, 'index.html')) {
+    res.writeHead(403).end('forbidden');
+    return;
+  }
+  fs.readFile(file, (err, data) => {
+    if (err) { res.writeHead(404).end('not found'); return; }
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+    res.end(data);
+  });
+}
+
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', c => {
+      body += c;
+      if (body.length > 1e6) reject(new Error('body too large'));
+    });
+    req.on('end', () => {
+      try { resolve(JSON.parse(body || '{}')); } catch (err) { reject(err); }
+    });
+  });
+}
+
+function sendJson(res, code, obj) {
+  const body = JSON.stringify(obj);
+  res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(body);
+}
+
+let engine = null;
+let selected = null;
+
+const server = http.createServer(async (req, res) => {
+  const url = req.url.split('?')[0];
+
+  if (url === '/api/status') {
+    return sendJson(res, 200, {
+      available: !!selected,
+      build: selected ? selected.tag : null,
+      about: selected ? selected.about : null,
+      running: !!(engine && engine.proc)
+    });
+  }
+
+  if (url === '/api/events') {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive'
+    });
+    res.write('retry: 2000\n\n');
+    sseClients.add(res);
+    req.on('close', () => sseClients.delete(res));
+    return;
+  }
+
+  if (url === '/api/move' && req.method === 'POST') {
+    if (!engine) return sendJson(res, 503, { error: 'no usable Rapfi build was found' });
+    try {
+      const body = await readJson(req);
+      const size = Math.min(20, Math.max(5, Number(body.size) || 15));
+      const rule = RULES[body.rule] != null ? RULES[body.rule] : 0;
+      const stones = Array.isArray(body.stones) ? body.stones : [];
+      const engineColor = body.engineColor === 2 ? 2 : 1;
+      const timeoutMs = Math.min(120000, Math.max(50, Number(body.timeoutMs) || 1000));
+      const strength = Math.min(100, Math.max(0, Number(body.strength)));
+
+      const result = await engine.run(() => engine.think({
+        size, rule, stones, engineColor, timeoutMs,
+        strength: Number.isFinite(strength) ? strength : 100
+      }));
+      return sendJson(res, 200, result);
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message });
+    }
+  }
+
+  if (url === '/api/analyze' && req.method === 'POST') {
+    if (!engine) return sendJson(res, 503, { error: 'no usable Rapfi build was found' });
+    try {
+      const body = await readJson(req);
+      const size = Math.min(20, Math.max(5, Number(body.size) || 15));
+      const rule = RULES[body.rule] != null ? RULES[body.rule] : 0;
+      const stones = Array.isArray(body.stones) ? body.stones : [];
+      const sideToMove = body.sideToMove === 2 ? 2 : 1;
+      const timeoutMs = Math.min(120000, Math.max(50, Number(body.timeoutMs) || 1000));
+      const count = Math.min(50, Math.max(1, Number(body.count) || 5));
+
+      const result = await engine.run(() => engine.analyze({
+        size, rule, stones, sideToMove, timeoutMs, count
+      }));
+      return sendJson(res, 200, result);
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message });
+    }
+  }
+
+  if (url === '/api/forbidden' && req.method === 'POST') {
+    if (!engine) return sendJson(res, 503, { error: 'no usable Rapfi build was found' });
+    try {
+      const body = await readJson(req);
+      const size = Math.min(20, Math.max(5, Number(body.size) || 15));
+      const rule = RULES[body.rule] != null ? RULES[body.rule] : 0;
+      const stones = Array.isArray(body.stones) ? body.stones : [];
+      const sideToMove = body.sideToMove === 2 ? 2 : 1;
+
+      const result = await engine.run(() => engine.forbidden({ size, rule, stones, sideToMove }));
+      return sendJson(res, 200, result);
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message });
+    }
+  }
+
+  if (url === '/api/newgame' && req.method === 'POST') {
+    if (engine) await engine.run(() => engine.newGame());
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (req.method !== 'GET') return sendJson(res, 405, { error: 'method not allowed' });
+  return serveStatic(req, res);
+});
+
+(async () => {
+  console.log('Rapfi Gomoku');
+  if (!fs.existsSync(ENGINE_DIR)) {
+    console.log('  engine/ folder is missing - the UI will fall back to the built-in engine');
+  } else {
+    selected = await selectBuild();
+    if (selected) {
+      console.log('  using ' + selected.tag + ' build');
+      engine = new Rapfi(selected.tag);
+      engine.start();
+    } else {
+      console.log('  no runnable Rapfi build - the UI will fall back to the built-in engine');
+    }
+  }
+
+  server.on('error', err => {
+    if (err.code === 'EADDRINUSE') {
+      console.error('  port ' + PORT + ' is already in use. Set PORT=<other> and retry.');
+      process.exit(1);
+    }
+    throw err;
+  });
+
+  server.listen(PORT, '127.0.0.1', () => {
+    console.log('  open http://127.0.0.1:' + PORT + '  (Ctrl+C to stop)');
+  });
+})();
+
+function shutdown() {
+  if (engine) engine.stop();
+  process.exit(0);
+}
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

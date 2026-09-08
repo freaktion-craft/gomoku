@@ -1,0 +1,7 @@
+# Rapfi itself is not committed: it is a 51 MB third-party GPL-3.0 release.
+# Run get-engine.cmd to download and unpack it.
+engine/
+
+*.log
+Thumbs.db
+.DS_Store
