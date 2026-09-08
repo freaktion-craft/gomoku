@@ -279,9 +279,8 @@
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     for (i = 0; i < SIZE; i++) {
-      ctx.fillText(G.COLUMNS[i], px(i), m.pad * 0.45);
+      // Letters along the bottom, numbers down the right, once each.
       ctx.fillText(G.COLUMNS[i], px(i), m.side - m.pad * 0.45);
-      ctx.fillText(String(SIZE - i), m.pad * 0.45, px(i));
       ctx.fillText(String(SIZE - i), m.side - m.pad * 0.45, px(i));
     }
 

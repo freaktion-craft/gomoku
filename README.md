@@ -192,7 +192,8 @@ board is drawn from the same CSS variables as the panel, so the grid, stones
 and markers all move with the theme rather than needing a second palette.
 
 Coordinates follow Gomocup notation: columns `A` to `O` with `I` included (not Go
-notation), rows 1 to 15 from the bottom. This is what Rapfi prints in its PV, so the
+notation), rows 1 to 15 from the bottom. They are drawn once each, letters along
+the bottom edge and numbers down the right. This is what Rapfi prints in its PV, so the
 move list and the engine output read the same way.
 
 ## Rules
