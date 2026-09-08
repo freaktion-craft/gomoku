@@ -106,7 +106,7 @@ body {
   display: flex;
   align-items: stretch;
   height: 100vh;
-  min-width: 900px;          /* below this the panels drop under the board */
+  min-width: 960px;          /* below this the panels drop under the board */
   overflow: hidden;
 }
 
@@ -231,11 +231,15 @@ body {
 
 .coach-prev {
   flex: none;
-  max-width: 130px;
+  min-width: 122px;          /* so the card reads as a card, not as loose text */
+  max-width: 170px;
   color: var(--text-dim);
 }
 
-.coach-cur { max-width: 230px; }
+.coach-cur {
+  min-width: 200px;
+  max-width: 300px;
+}
 
 .coach-label,
 .coach-phase {
@@ -289,8 +293,9 @@ body {
 }
 
 .panel-left {
-  flex: 0 0 200px;
-  min-width: 200px;
+  /* Wide enough for the whole row: number, colour, point, score and grade. */
+  flex: 0 0 252px;
+  min-width: 252px;
   gap: 10px;
   padding: 18px 16px;
   border-left: none;

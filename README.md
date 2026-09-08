@@ -247,8 +247,8 @@ blank, because Rapfi returns no evaluation before the first stone.
 
 ## Layout
 
-Three columns: the move list on the left, the board in the middle, the
-controls on the right. The move list moved out of the right panel because that
+Three columns: the move list on the left at 252px, the board in the middle,
+the controls on the right. The move list moved out of the right panel because that
 panel was growing long enough to push the page around.
 
 The app is pinned to the viewport height, so each panel scrolls inside itself
