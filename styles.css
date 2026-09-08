@@ -231,14 +231,17 @@ body {
 
 .coach-prev {
   flex: none;
-  min-width: 122px;          /* so the card reads as a card, not as loose text */
-  max-width: 170px;
+  width: 130px;
+  height: 72px;
+  background: var(--bg);     /* sits back behind the current card */
   color: var(--text-dim);
+  font-size: 11px;
 }
 
 .coach-cur {
-  min-width: 200px;
-  max-width: 300px;
+  flex: none;
+  width: 300px;
+  height: 96px;
 }
 
 .coach-label,
@@ -269,13 +272,19 @@ body {
 
 .coach-note:empty { display: none; }
 
-@media (max-width: 760px) {
-  .coach-row { top: 12px; right: 12px; gap: 6px; }
+/* Narrower pane: the note needs more lines, so the card gets shorter and
+   taller rather than being allowed to resize itself. */
+@media (max-width: 1180px) {
+  .coach-prev { width: 115px; }
+  .coach-cur { width: 220px; height: 112px; }
 }
 
-@media (max-width: 520px) {
-  .coach { font-size: 11px; padding: 5px 8px; }
+@media (max-width: 860px) {
   .coach-prev { display: none; }   /* not enough room for both */
+}
+
+@media (max-width: 760px) {
+  .coach-row { top: 12px; right: 12px; gap: 6px; }
 }
 
 /* Panel */

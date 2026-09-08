@@ -116,9 +116,18 @@ see what the reply answered:
                     then the three wins
 ```
 
-The previous card is dimmed and disappears on the opening move, when there is
-nothing before it. The current card stays put either way, so it does not jump
-when the other one appears. Below 520px wide only the current card is shown.
+Both cards have a fixed width and height, so neither resizes as the wording
+under it changes and nothing on the board shifts around. The sizes come from
+measuring the tallest wording each card can hold: 80px for the current card at
+300px wide and 65px for the previous one, each given a line of headroom. On a
+narrower pane the note needs more lines, so there is a second pair of fixed
+sizes rather than letting the cards resize themselves.
+
+The previous card is deliberately quieter: smaller text, dimmed, and on the
+page background rather than the panel white, so it sits behind the current
+card. It disappears on the opening move, when there is nothing before it, and
+the current card is right-anchored so it does not move when the other appears.
+Below 860px wide only the current card is shown.
 
 The terms are the real ones. A **four** has one point that would complete
 five, so it forces a reply. An **open four** has two such points and cannot be
