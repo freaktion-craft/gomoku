@@ -41,8 +41,9 @@
    'review', 'theme', 'renjuOption', 'coachPhase', 'coachNote',
    'prevMove', 'prevShape', 'curMove', 'curShape', 'coachPrev',
    'boardStack', 'evalBar', 'evalFill', 'evalNumWhite', 'evalNumBlack',
-   'evalBarToggle', 'panelToggle', 'panelTab', 'panelLeft', 'leftToggle',
-   'leftTab'].forEach(function (id) {
+   'evalBarToggle', 'panelToggle', 'panelTab', 'panelLeft', 'leftToggle', 'leftTab', 'leftTitle',
+   'lessons', 'lessonList', 'lessonTitle', 'lessonBrief', 'lessonFeedback',
+   'lessonRetry', 'lessonNext'].forEach(function (id) {
     els[id] = document.getElementById(id);
   });
 
@@ -67,6 +68,10 @@
     shapes: [],         // shapes[i] names what history[i] created
     hintOn: false,
     evalBarOn: true,
+    lesson: -1,         // index into LESSONS, -1 when none is loaded
+    lessonSolved: false,
+    lessonNote: '',
+    lessonDone: {},
     whiteRate: null,    // white's share of the win chance, 0 to 1
     panelOpen: true,
     leftOpen: true,
@@ -338,6 +343,7 @@
      every stone to the user, coach just keeps the analysis running. */
   function engineColor() {
     var mode = els.mode.value;
+    if (mode === 'lesson') return 0;
     if (mode === 'ai-white') return WHITE;
     if (mode === 'ai-black') return BLACK;
     return 0;
@@ -614,6 +620,224 @@
     return 'middle game';
   }
 
+  /* ---- lessons -----------------------------------------------------------
+     Each lesson is a position plus one thing to find. A lesson about a shape
+     accepts any move that makes that shape; a lesson about answering a threat
+     accepts only the squares that actually answer it.
+
+     Coordinates are engine coordinates, x from the left and y from the bottom,
+     so they read the same way as the labels on the board. Filler stones sit far
+     apart where they cannot form a line or change the lesson, and they also set
+     whose turn it is: Black moves when both sides have the same count. */
+
+  var FILLER = [[0, 0], [14, 0], [0, 14], [14, 14], [0, 7], [14, 7],
+                [7, 0], [7, 14], [2, 2], [12, 12], [2, 12], [12, 2]];
+
+  function fillers(count) { return FILLER.slice(0, count); }
+
+  var LESSONS = [
+    {
+      title: 'Make an open three',
+      brief: 'Black to play. Add one stone to the two on the board so they become an open three.',
+      why: 'An open three has room at both ends, so next move it could become an open four that cannot be stopped. That is why it forces an answer.',
+      black: [[6, 7], [7, 7]],
+      white: fillers(2),
+      turn: BLACK,
+      want: { shape: 'open three' }
+    },
+    {
+      title: 'Answer an open three',
+      brief: 'White has an open three across the middle. Black to play: stop it before it becomes an open four.',
+      why: 'You block at one of the two ends. Anywhere else and White takes an end themselves, reaching an open four with two ways to make five.',
+      black: fillers(3),
+      white: [[5, 7], [6, 7], [7, 7]],
+      turn: BLACK,
+      want: { cells: [[4, 7], [8, 7]] }
+    },
+    {
+      title: 'Answer a four',
+      brief: 'White has four in a row, blocked at one end. Black to play: only one square saves the game.',
+      why: 'A four threatens five at once, so it must be answered on the single square that would complete it. That is what makes fours forcing: the reply is not a choice.',
+      black: [[3, 7]].concat(fillers(3)),
+      white: [[4, 7], [5, 7], [6, 7], [7, 7]],
+      turn: BLACK,
+      want: { cells: [[8, 7]] }
+    },
+    {
+      title: 'Make a four',
+      brief: 'Black to play. White has blocked one end of your three. Make a four anyway.',
+      why: 'Even blocked on one side a four forces a reply, so it buys you a free move elsewhere. Chaining these is how a forced win gets built.',
+      black: [[5, 7], [6, 7], [7, 7]],
+      white: [[4, 7]].concat(fillers(2)),
+      turn: BLACK,
+      want: { shape: 'four' }
+    },
+    {
+      title: 'Make an open four',
+      brief: 'Black to play. Nothing is blocking you this time. Turn the three into an open four.',
+      why: 'An open four has two squares that would make five. Your opponent can block only one of them, so an open four simply wins.',
+      black: [[5, 7], [6, 7], [7, 7]],
+      white: fillers(3),
+      turn: BLACK,
+      want: { shape: 'open four' }
+    },
+    {
+      title: 'The four-three fork',
+      brief: 'Black to play. One square makes a four across and a three downward at the same time. Find it.',
+      why: 'The four must be answered, and while it is being answered you turn the three into an open four. Two threats and one reply: the most common winning pattern in gomoku.',
+      black: [[4, 7], [5, 7], [6, 7], [7, 5], [7, 6]],
+      white: [[3, 7]].concat(fillers(4)),
+      turn: BLACK,
+      want: { shape: 'four-three' }
+    },
+    {
+      title: 'The double three',
+      brief: 'Black to play. Find the square that makes two open threes at once.',
+      why: 'Both threes demand an answer and only one can get it. This is exactly the move renju forbids Black from playing, which tells you how strong it is.',
+      black: [[6, 7], [8, 7], [7, 5], [7, 6]],
+      white: fillers(4),
+      turn: BLACK,
+      want: { shape: 'double three' }
+    },
+    {
+      title: 'The double four',
+      brief: 'Black to play. Both lines are blocked at one end, but one square still completes two separate fours.',
+      why: 'Each four threatens five on its own square, and only one of them can be blocked. Blocked at one end they are ordinary fours rather than open ones, and the pair still wins.',
+      black: [[3, 7], [4, 7], [6, 7], [5, 4], [5, 5], [5, 6]],
+      white: [[2, 7], [5, 3]].concat(fillers(4)),
+      turn: BLACK,
+      want: { shape: 'double four' }
+    },
+    {
+      title: 'Take the fork square first',
+      brief: 'Now you are on the other side of it. White is one move from a four-three. Black to play: take that square away.',
+      why: 'Forks are stopped before they happen, not after. Watch for the point where two of your opponent lines cross, and sit on it.',
+      black: [[3, 7]].concat(fillers(4)),
+      white: [[4, 7], [5, 7], [6, 7], [7, 5], [7, 6]],
+      turn: BLACK,
+      want: { cells: [[7, 7]] }
+    }
+  ];
+
+  var LESSON_KEY = 'gomoku.lessons';
+
+  function isLessonMode() { return els.mode.value === 'lesson'; }
+
+  function lessonAccepts(lesson, cell, shape) {
+    if (lesson.want.shape) return !!shape && shape.name === lesson.want.shape;
+    return lesson.want.cells.some(function (p) { return fromEngine(p[0], p[1]) === cell; });
+  }
+
+  function lessonAnswerCells(lesson) {
+    if (lesson.want.cells) {
+      return lesson.want.cells.map(function (p) { return fromEngine(p[0], p[1]); });
+    }
+    // A shape lesson: every empty point that would make the wanted shape.
+    var out = [];
+    for (var c = 0; c < SIZE * SIZE; c++) {
+      if (board.cells[c] !== EMPTY) continue;
+      board.cells[c] = state.turn;
+      var shape = describeMove(c, state.turn);
+      board.cells[c] = EMPTY;
+      if (shape.name === lesson.want.shape) out.push(c);
+    }
+    return out;
+  }
+
+  function loadLesson(index) {
+    if (index < 0 || index >= LESSONS.length) return;
+    var lesson = LESSONS[index];
+    state.lesson = index;
+    state.lessonSolved = false;
+    state.lessonNote = '';
+
+    board.reset();
+    lesson.black.forEach(function (p) { board.cells[fromEngine(p[0], p[1])] = BLACK; });
+    lesson.white.forEach(function (p) { board.cells[fromEngine(p[0], p[1])] = WHITE; });
+    board.stones = lesson.black.length + lesson.white.length;
+    for (var c = 0; c < SIZE * SIZE; c++) {
+      if (board.cells[c] !== EMPTY) board.refreshLines(c);
+    }
+
+    state.turn = lesson.turn;
+    state.over = false;
+    state.winner = 0;
+    state.winLine = null;
+    state.grades = [];
+    state.shapes = [];
+    state.prior = null;
+    state.hint = -1;
+    state.error = '';
+    state.whiteRate = null;
+    clearCandidates();
+    clearForbidden();
+    clearAnalysis();
+    render();
+  }
+
+  /* The learner has just played. Keep the stone if it is right, take it back if
+     it is not, so the same position is there to try again. */
+  function judgeLesson() {
+    var lesson = LESSONS[state.lesson];
+    if (!lesson || state.lessonSolved) return;
+    var i = board.history.length - 1;
+    if (i < 0) return;
+    var cell = board.history[i];
+    var shape = state.shapes[i];
+
+    if (lessonAccepts(lesson, cell, shape)) {
+      state.lessonSolved = true;
+      state.lessonNote = 'Yes. ' + G.toCoord(cell) +
+        (shape && shape.name !== 'quiet move' ? ' makes a ' + shape.name + '. ' : '. ') + lesson.why;
+      state.lessonDone[state.lesson] = true;
+      store(LESSON_KEY, Object.keys(state.lessonDone).join(','));
+      render();
+      return;
+    }
+
+    state.lessonNote = 'Not that one. ' + G.toCoord(cell) +
+      (shape ? ' makes a ' + shape.name + '.' : '.') + ' Try again.';
+    board.undo();
+    state.shapes.length = board.history.length;
+    state.turn = lesson.turn;
+    state.over = false;
+    state.winner = 0;
+    state.winLine = null;
+    render();
+  }
+
+  function firstUnsolvedLesson() {
+    for (var i = 0; i < LESSONS.length; i++) {
+      if (!state.lessonDone[i]) return i;
+    }
+    return 0;
+  }
+
+  function renderLessons() {
+    var on = isLessonMode();
+    els.lessons.hidden = !on;
+    els.movelog.hidden = on;
+    els.leftTitle.textContent = on ? 'Lessons' : 'Moves';
+    if (!on) return;
+
+    var html = '';
+    for (var i = 0; i < LESSONS.length; i++) {
+      var cls = (i === state.lesson ? 'current' : '') + (state.lessonDone[i] ? ' done' : '');
+      html += '<li class="' + cls + '" data-lesson="' + i + '">' +
+              '<span class="n">' + (i + 1) + '</span>' +
+              '<span class="t">' + LESSONS[i].title + '</span></li>';
+    }
+    els.lessonList.innerHTML = html;
+
+    var lesson = LESSONS[state.lesson];
+    els.lessonTitle.textContent = lesson ? (state.lesson + 1) + '. ' + lesson.title : '';
+    els.lessonBrief.textContent = lesson ? lesson.brief : 'Pick a lesson to begin.';
+    els.lessonFeedback.textContent = state.lessonNote;
+    els.lessonFeedback.className = 'lesson-feedback' + (state.lessonSolved ? ' ok' : '');
+    els.lessonRetry.disabled = state.lesson < 0;
+    els.lessonNext.disabled = state.lesson < 0 || state.lesson >= LESSONS.length - 1;
+  }
+
   /* ---- scored options ----------------------------------------------------
      Rapfi ranks candidates as it searches, but a rank order captured when the
      clock stops can lag the scores it just produced, so the list is sorted by
@@ -650,6 +874,7 @@
 
   function requestAnalysis() {
     // Tactics mode analyses even when the option list is switched off.
+    if (isLessonMode()) { clearCandidates(); return; }   // the lesson owns the board
     var count = Number(els.nbest.value) || (isCoach() ? 5 : 0)
                 || (state.hintOn || state.evalBarOn ? 1 : 0);
     if (!count || backend.kind !== 'rapfi' || state.over || !isHumanTurn()) {
@@ -875,6 +1100,7 @@
   /* Called whenever the position changes: either the engine owes a move, or
      the side to move is human and their options can be scored. */
   function settle() {
+    if (isLessonMode()) { judgeLesson(); render(); return; }
     requestForbidden();
     var color = engineColor();
     if (!state.over && color && state.turn === color && !state.thinking) maybeEngineMove();
@@ -914,6 +1140,7 @@
   }
 
   function newGame() {
+    if (isLessonMode()) { loadLesson(state.lesson); return; }
     board.reset();
     state.turn = BLACK;
     state.over = false;
@@ -1023,6 +1250,12 @@
       state.hint = -1;
       return;
     }
+    if (isLessonMode()) {
+      var lesson = LESSONS[state.lesson];
+      var answers = lesson ? lessonAnswerCells(lesson) : [];
+      state.hint = answers.length ? answers[0] : -1;
+      return;
+    }
     if (backend.kind === 'rapfi') return;   // comes back with the analysis
     var seq = ++state.candSeq;
     askLocal(state.turn).then(function (res) {
@@ -1069,7 +1302,7 @@
     if (!state.over && engineColor()) meta += ' · you are ' + name(3 - engineColor());
     els.statusMeta.textContent = state.error || meta;
 
-    els.undo.disabled = state.thinking || board.history.length === 0;
+    els.undo.disabled = state.thinking || board.history.length === 0 || isLessonMode();
     els.undoAll.disabled = els.undo.disabled;
     if (els.undoAll.disabled) cancelHold();   // nothing left to wipe, drop the countdown
     els.hint.disabled = false;
@@ -1145,6 +1378,7 @@
   function render() {
     draw();
     renderPanel();
+    renderLessons();
     renderCandidates();
     renderCoach();
     renderEvalBar();
@@ -1188,7 +1422,23 @@
   els.undoAll.addEventListener('touchend', cancelHold);
   els.undoAll.addEventListener('touchcancel', cancelHold);
   els.undoAll.addEventListener('click', function (e) { e.preventDefault(); });
-  els.mode.addEventListener('change', newGame);
+  els.mode.addEventListener('change', function () {
+    if (isLessonMode()) {
+      state.hintOn = false;
+      loadLesson(state.lesson >= 0 ? state.lesson : firstUnsolvedLesson());
+    } else {
+      state.lesson = -1;
+      newGame();
+    }
+  });
+
+  els.lessonList.addEventListener('click', function (e) {
+    var li = e.target.closest ? e.target.closest('li[data-lesson]') : null;
+    if (li) loadLesson(Number(li.getAttribute('data-lesson')));
+  });
+
+  els.lessonRetry.addEventListener('click', function () { loadLesson(state.lesson); });
+  els.lessonNext.addEventListener('click', function () { loadLesson(state.lesson + 1); });
   els.rule.addEventListener('change', newGame);
   els.nbest.addEventListener('change', requestAnalysis);
 
@@ -1310,6 +1560,9 @@
 
   initTheme();
   state.evalBarOn = recall(EVALBAR_KEY) !== 'off';
+  (recall(LESSON_KEY) || '').split(',').forEach(function (n) {
+    if (n !== '') state.lessonDone[Number(n)] = true;
+  });
   state.panelOpen = recall(PANEL_KEY) !== 'closed';
   state.leftOpen = recall(LEFT_KEY) !== 'closed';
   applyPanelState();

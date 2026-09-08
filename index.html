@@ -10,10 +10,22 @@
 <div class="app">
   <aside class="panel panel-left" id="panelLeft">
     <div class="panel-left-head">
-      <span class="label">Moves</span>
-      <button id="leftToggle" class="icon-btn" title="Hide the move list">Hide</button>
+      <span class="label" id="leftTitle">Moves</span>
+      <button id="leftToggle" class="icon-btn" title="Hide this panel">Hide</button>
     </div>
     <ol class="movelog" id="movelog"></ol>
+    <div class="lessons" id="lessons" hidden>
+      <ol class="lesson-list" id="lessonList"></ol>
+      <div class="lesson-task" id="lessonTask">
+        <div class="lesson-title" id="lessonTitle"></div>
+        <div class="lesson-brief" id="lessonBrief"></div>
+        <div class="lesson-feedback" id="lessonFeedback"></div>
+        <div class="lesson-actions">
+          <button id="lessonRetry" class="btn">Reset</button>
+          <button id="lessonNext" class="btn">Next</button>
+        </div>
+      </div>
+    </div>
   </aside>
 
   <main class="board-pane">
@@ -74,6 +86,7 @@
         <option value="ai-black">Engine plays Black</option>
         <option value="human">Two players</option>
         <option value="coach">Tactics: engine only advises</option>
+        <option value="lesson">Lessons: guided practice</option>
       </select>
     </section>
 

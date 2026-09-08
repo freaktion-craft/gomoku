@@ -73,7 +73,7 @@ consumer Raptor Lake, and **avxvnni** is selected.
 
 | | |
 |---|---|
-| Opponent | which colour Rapfi plays, two-player hotseat, or tactics |
+| Opponent | which colour Rapfi plays, two-player hotseat, tactics, or lessons |
 | Strength | Rapfi's `INFO strength`, 0-100 |
 | Think time | per-move limit, `INFO timeout_turn` |
 | Rule | freestyle (five or more), standard (exactly five), or renju |
@@ -149,6 +149,41 @@ four (a closed three). It runs locally, so it still works with the bridge off.
 The phase word on the card is descriptive rather than canonical: opening for
 the first few stones, attack once the last move made a three or better, and
 middle game otherwise.
+
+## Lessons
+
+Pick **Lessons** as the opponent and the left panel becomes a menu of nine
+positions, each teaching one idea, in the order the ideas build on each other:
+
+1. Make an open three
+2. Answer an open three
+3. Answer a four
+4. Make a four
+5. Make an open four
+6. The four-three fork
+7. The double three
+8. The double four
+9. Take the fork square first
+
+Each sets up a position and asks for one move. Play it on the board: a right
+answer stays and is explained, a wrong one is taken back so the position is
+there to try again, and the feedback names the shape the wrong move actually
+made. Solved lessons are remembered between sessions.
+
+The lessons about a shape accept **any** move that makes it, not one blessed
+square, because the point is the shape. The lessons about answering a threat
+accept only the squares that genuinely answer it. Hint, while a lesson is
+open, rings the lesson answer rather than the engine choice, and option
+scoring is suppressed so it cannot contradict what is being taught. The
+engine plays no stones here, so lessons work with the bridge off.
+
+Every lesson is checked by the test harness: it loads the position, confirms
+the stone counts put the right side to move, derives the accepted answers from
+the shape classifier, plays a deliberately wrong move and checks it is
+refused, then plays a real answer and checks it is accepted. That caught one
+position that had no reachable answer at all: what was meant to be a double
+four had both lines open, so the move made an open four instead, which is the
+stronger shape. Both lines are now blocked at one end.
 
 ## Tactics mode and the move log
 
