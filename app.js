@@ -974,7 +974,7 @@
      Wiping the whole game is a press-and-hold rather than a click, so it
      cannot happen by accident. Letting go early abandons it. */
 
-  var HOLD_MS = 3000;
+  var HOLD_MS = 1500;
   var hold = { active: false, raf: 0, start: 0 };
 
   function holdTick() {
@@ -986,7 +986,7 @@
     }
     var pct = (elapsed / HOLD_MS) * 100;
     els.undoAll.style.setProperty('--hold', pct.toFixed(1) + '%');
-    els.undoAll.textContent = 'Hold ' + Math.ceil((HOLD_MS - elapsed) / 1000);
+    els.undoAll.textContent = 'Hold ' + ((HOLD_MS - elapsed) / 1000).toFixed(1);
     hold.raf = window.requestAnimationFrame(holdTick);
   }
 

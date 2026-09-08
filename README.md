@@ -89,8 +89,8 @@ engine. Scored options are drawn on the board and listed in the panel, and
 clicking one plays it.
 
 **Undo all** wipes the whole game, so it is a press-and-hold rather than a
-click: hold the button (or `Shift+U`) for three seconds and it fills up as it
-counts down. A plain click does nothing, and releasing early or dragging off
+click: hold the button (or `Shift+U`) for a second and a half and it fills up
+as it counts down. A plain click does nothing, and releasing early or dragging off
 the button abandons it. It clears the board without touching your settings, and
 lets the engine re-open if it has Black.
 
