@@ -39,7 +39,7 @@
    'rule', 'newGame', 'undo', 'undoAll', 'hint', 'movelog', 'analysis',
    'anDepth', 'anEval', 'anNodes', 'anSpeed', 'anPv', 'nbest', 'candList',
    'review', 'theme', 'renjuOption', 'coachPhase', 'coachNote',
-   'prevMove', 'prevShape', 'curMove', 'curShape',
+   'prevMove', 'prevShape', 'curMove', 'curShape', 'coachPrev',
    'boardStack', 'evalBar', 'evalFill', 'evalNumWhite', 'evalNumBlack',
    'evalBarToggle', 'panelToggle', 'panelTab', 'panelLeft', 'leftToggle',
    'leftTab'].forEach(function (id) {
@@ -1122,13 +1122,14 @@
     els.coachPhase.textContent = titleCase(phaseName());
 
     if (i < 0) {
-      setCoachColumn(els.prevMove, els.prevShape, -1);
+      els.coachPrev.hidden = true;
       els.curMove.textContent = "Black opens";
       els.curShape.textContent = "";
       els.coachNote.textContent = "the first stone usually goes near the centre";
       return;
     }
 
+    els.coachPrev.hidden = i < 1;
     setCoachColumn(els.prevMove, els.prevShape, i - 1);
     setCoachColumn(els.curMove, els.curShape, i);
 

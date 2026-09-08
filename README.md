@@ -103,19 +103,22 @@ Gomoku has no settled opening, middle game and endgame the way chess does.
 Games are short and there is no material, so the vocabulary is about threats
 instead, and that is what the board teaches.
 
-A card sits in the top right corner of the board section, inset to line up
-with the pane’s own padding. It names what the last move made, with the move
-before it alongside on the left so you can see what the reply answered:
+Two small cards sit in the top right corner of the board section, inset to line
+up with the pane’s own padding. The right one names what the move just played
+made; the left one is a separate card holding the move before it, so you can
+see what the reply answered:
 
 ```
-Attack
-W A15            B H8
-quiet move       four-three
-a fork: the four must be answered, then the three wins
+  Previous          Attack
+  W A15             B H8
+  quiet move        four-three
+                    a fork: the four must be answered,
+                    then the three wins
 ```
 
-The left column is the previous move, dimmed; the right column is the move
-just played. Each shows which colour played it, where, and the shape it made.
+The previous card is dimmed and disappears on the opening move, when there is
+nothing before it. The current card stays put either way, so it does not jump
+when the other one appears. Below 520px wide only the current card is shown.
 
 The terms are the real ones. A **four** has one point that would complete
 five, so it forces a reply. An **open four** has two such points and cannot be

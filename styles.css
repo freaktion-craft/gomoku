@@ -206,58 +206,57 @@ body {
 
 #board.locked { cursor: default; }
 
-.coach {
+/* Two cards in the corner of the board section: the move before on the left,
+   the move just played on the right. */
+.coach-row {
   position: absolute;
-  top: 24px;                 /* lines up with the pane's own padding */
+  top: 24px;                 /* lines up with the pane’s own padding */
   right: 24px;
-  max-width: min(300px, 55%);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: calc(100% - 48px);
+  pointer-events: none;
+}
+
+.coach {
   padding: 8px 11px;
   background: var(--surface);
   border: 1px solid var(--border);
   font-size: 12px;
   line-height: 1.4;
-  pointer-events: none;
 }
 
+.coach[hidden] { display: none; }
+
+.coach-prev {
+  flex: none;
+  max-width: 130px;
+  color: var(--text-dim);
+}
+
+.coach-cur { max-width: 230px; }
+
+.coach-label,
 .coach-phase {
-  font-weight: 600;
   font-size: 11px;
   color: var(--text-dim);
 }
 
-/* The move just played sits on the right, the one before it on the left. */
-.coach-moves {
-  display: flex;
-  gap: 9px;
-  margin-top: 3px;
-}
-
-.coach-move {
-  flex: 1 1 0;
-  min-width: 0;
-}
-
-.coach-move.prev { color: var(--text-dim); }
-
-.coach-move.cur {
-  padding-left: 9px;
-  border-left: 1px solid var(--border);
-}
+.coach-phase { font-weight: 600; }
 
 .cm-move {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
-.coach-move.cur .cm-move { font-weight: 600; }
+.coach-cur .cm-move { font-weight: 600; }
 
 .cm-shape {
   font-size: 11px;
   color: var(--text-dim);
   line-height: 1.35;
 }
-
-.coach-moves:empty { display: none; }
 
 .coach-note {
   color: var(--text-dim);
@@ -267,13 +266,12 @@ body {
 .coach-note:empty { display: none; }
 
 @media (max-width: 760px) {
-  .coach { top: 12px; right: 12px; }
+  .coach-row { top: 12px; right: 12px; gap: 6px; }
 }
 
 @media (max-width: 520px) {
-  .coach { font-size: 11px; padding: 5px 8px; max-width: 60%; }
-  .coach-moves { gap: 7px; }
-  .coach-move.cur { padding-left: 7px; }
+  .coach { font-size: 11px; padding: 5px 8px; }
+  .coach-prev { display: none; }   /* not enough room for both */
 }
 
 /* Panel */
@@ -389,7 +387,7 @@ body {
 
 .app.panel-collapsed > .panel:not(.panel-left) { display: none; }
 .app.panel-collapsed .panel-tab:not(.left) { display: block; }
-.app.panel-collapsed .coach { right: 40px; }
+.app.panel-collapsed .coach-row { right: 40px; }
 
 .app.left-collapsed .panel-left { display: none; }
 .app.left-collapsed .panel-tab.left { display: block; }

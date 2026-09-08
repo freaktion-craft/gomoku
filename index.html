@@ -28,19 +28,18 @@
         <canvas id="board" width="600" height="600"></canvas>
       </div>
     </div>
-    <div class="coach" id="coach">
-      <div class="coach-phase" id="coachPhase">Opening</div>
-      <div class="coach-moves">
-        <div class="coach-move prev">
-          <div class="cm-move" id="prevMove"></div>
-          <div class="cm-shape" id="prevShape"></div>
-        </div>
-        <div class="coach-move cur">
-          <div class="cm-move" id="curMove"></div>
-          <div class="cm-shape" id="curShape"></div>
-        </div>
+    <div class="coach-row" id="coachRow">
+      <div class="coach coach-prev" id="coachPrev" hidden>
+        <div class="coach-label">Previous</div>
+        <div class="cm-move" id="prevMove"></div>
+        <div class="cm-shape" id="prevShape"></div>
       </div>
-      <div class="coach-note" id="coachNote"></div>
+      <div class="coach coach-cur" id="coachCur">
+        <div class="coach-phase" id="coachPhase">Opening</div>
+        <div class="cm-move" id="curMove"></div>
+        <div class="cm-shape" id="curShape"></div>
+        <div class="coach-note" id="coachNote"></div>
+      </div>
     </div>
   </main>
 
