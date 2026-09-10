@@ -42,30 +42,37 @@
      on different lines and so add up - that is what makes double threats win. */
 
   var TIERS = [
-    { re: /xxxxx/g,                              value: 5000000 }, // five
-    { re: /\.xxxx\./g,                           value: 200000 },  // open four
-    { re: /xxxx\.|\.xxxx|xxx\.x|x\.xxx|xx\.xx/g, value: 20000 },   // four
-    { re: /\.xxx\.|\.x\.xx\.|\.xx\.x\./g,        value: 8000 },    // open three
-    { re: /xxx\.|\.xxx|xx\.x|x\.xx/g,            value: 900 },     // closed three
-    { re: /\.xx\.|\.x\.x\./g,                    value: 220 },     // open two
-    { re: /xx|x\.x/g,                            value: 45 },      // two
-    { re: /x/g,                                  value: 4 }        // lone stone
+    { key: 'five',        re: /xxxxx/g,                              value: 5000000 },
+    { key: 'openFour',    re: /\.xxxx\./g,                           value: 200000 },
+    { key: 'four',        re: /xxxx\.|\.xxxx|xxx\.x|x\.xxx|xx\.xx/g, value: 20000 },
+    { key: 'openThree',   re: /\.xxx\.|\.x\.xx\.|\.xx\.x\./g,        value: 8000 },
+    { key: 'closedThree', re: /xxx\.|\.xxx|xx\.x|x\.xx/g,             value: 900 },
+    { key: 'openTwo',     re: /\.xx\.|\.x\.x\./g,                     value: 220 },
+    { key: 'two',         re: /xx|x\.x/g,                             value: 45 },
+    { key: 'lone',        re: /x/g,                                   value: 4 }
   ];
 
-  function scoreString(s) {
-    for (var t = 0; t < TIERS.length; t++) {
-      var re = TIERS[t].re;
-      re.lastIndex = 0;
-      var count = 0;
-      while (re.exec(s) !== null) count++;
-      if (count) return TIERS[t].value * count;
-    }
-    return 0;
-  }
+  /* ---- perception -------------------------------------------------------
+     What a player actually notices, as a multiplier per shape. At 1 a shape is
+     worth what it is worth; below 1 the player under-reads it. A board with no
+     perception set reads every shape truly, which is the engine playing its
+     own game.
+
+     This is the whole of how a weak opponent is built here, and it is a table
+     rather than one number on purpose: a beginner's blind spot is specific, not
+     general. They spot a four and walk straight past an open three. Scaling
+     every shape down together would only produce a player who is uniformly
+     vague, which is not a thing a person is.
+
+     Weakness built this way is a property of the position rather than of a roll
+     of the dice. The same board always draws the same mistake, and the mistakes
+     land where a beginner's land - which is the difference between an opponent
+     you can learn to beat and one that merely twitches. */
 
   /* ---- board ---------------------------------------------------------- */
 
-  function Board() {
+  function Board(perception) {
+    this.perception = perception || null;
     this.cells = new Int8Array(N);
     this.history = [];
     this.lineScore = [null, new Int32Array(LINES.length), new Int32Array(LINES.length)];
@@ -85,6 +92,22 @@
 
   Board.prototype.at = function (x, y) { return this.cells[y * SIZE + x]; };
 
+  Board.prototype.tierValue = function (t) {
+    var scale = this.perception ? this.perception[TIERS[t].key] : null;
+    return scale == null ? TIERS[t].value : TIERS[t].value * scale;
+  };
+
+  Board.prototype.scoreLine = function (str) {
+    for (var t = 0; t < TIERS.length; t++) {
+      var re = TIERS[t].re;
+      re.lastIndex = 0;
+      var count = 0;
+      while (re.exec(str) !== null) count++;
+      if (count) return this.tierValue(t) * count;
+    }
+    return 0;
+  };
+
   Board.prototype.lineToString = function (lineId, player) {
     var cells = LINES[lineId], out = '';
     for (var i = 0; i < cells.length; i++) {
@@ -99,7 +122,7 @@
     for (var i = 0; i < ids.length; i++) {
       var id = ids[i];
       for (var p = 1; p <= 2; p++) {
-        var next = scoreString(this.lineToString(id, p));
+        var next = this.scoreLine(this.lineToString(id, p));
         this.total[p] += next - this.lineScore[p][id];
         this.lineScore[p][id] = next;
       }
@@ -178,26 +201,40 @@
     this.cells[cell] = player;
     var ids = CELL_LINES[cell], gain = 0;
     for (var i = 0; i < ids.length; i++) {
-      gain += scoreString(this.lineToString(ids[i], player)) - this.lineScore[player][ids[i]];
+      gain += this.scoreLine(this.lineToString(ids[i], player)) - this.lineScore[player][ids[i]];
     }
     this.cells[cell] = EMPTY;
     return gain;
   };
 
-  /* Empty points within 2 of a stone, best-looking first. */
-  Board.prototype.candidates = function (player, limit) {
-    if (this.stones === 0) return [(SIZE >> 1) * SIZE + (SIZE >> 1)];
+  /* What every empty point within 2 of a stone is worth to `player`: the shapes
+     it would build for them, plus the shapes it would deny the opponent. The
+     opponent's half is discounted because the side to move gets to act first,
+     which is the same reason `evaluate` weights the mover up. Sorted best
+     first, so a caller wanting only the top few can cut the list short.
+
+     `defendWeight` overrides that discount, for a caller that wants to weigh
+     attack against defence differently from the search. */
+  Board.prototype.influence = function (player, defendWeight) {
     var seen = new Uint8Array(N), list = [], opp = 3 - player;
+    var weight = defendWeight == null ? 0.85 : defendWeight;
     for (var h = 0; h < this.history.length; h++) {
       var near = NEAR[this.history[h]];
       for (var i = 0; i < near.length; i++) {
         var c = near[i];
         if (this.cells[c] !== EMPTY || seen[c]) continue;
         seen[c] = 1;
-        list.push({ cell: c, score: this.gainAt(c, player) + this.gainAt(c, opp) * 0.85 });
+        list.push({ cell: c, value: this.gainAt(c, player) + this.gainAt(c, opp) * weight });
       }
     }
-    list.sort(function (a, b) { return b.score - a.score; });
+    list.sort(function (a, b) { return b.value - a.value; });
+    return list;
+  };
+
+  /* Empty points within 2 of a stone, best-looking first. */
+  Board.prototype.candidates = function (player, limit) {
+    if (this.stones === 0) return [(SIZE >> 1) * SIZE + (SIZE >> 1)];
+    var list = this.influence(player);
     if (limit && list.length > limit) list.length = limit;
     var out = [];
     for (var k = 0; k < list.length; k++) out.push(list[k].cell);
@@ -243,8 +280,40 @@
     return best;
   };
 
+  /* Which root move to actually play. With no slack it is simply the best one,
+     picking at random between exact ties. With slack, any move within that much
+     of the best is a candidate, weighted towards the better ones - the offline
+     stand-in for the eval window the server samples with. A decided position is
+     never traded away for variety: a winning score is always taken. */
+  function pickWithin(scored, best, slack) {
+    if (!scored.length) return -1;
+    var i, pool = [], weights = [], total = 0;
+
+    if (!(slack > 0) || best >= WIN_SCORE) {
+      for (i = 0; i < scored.length; i++) {
+        if (scored[i].value === best) pool.push(scored[i].cell);
+      }
+      return pool[(Math.random() * pool.length) | 0];
+    }
+
+    for (i = 0; i < scored.length; i++) {
+      var loss = best - scored[i].value;
+      if (loss > slack) continue;
+      var w = 0.15 + 0.85 * (1 - loss / slack);
+      pool.push(scored[i].cell);
+      weights.push(w);
+      total += w;
+    }
+    var roll = Math.random() * total;
+    for (i = 0; i < pool.length; i++) {
+      roll -= weights[i];
+      if (roll <= 0) return pool[i];
+    }
+    return pool[0];
+  }
+
   /* Pick a move for `player`. Depth 1 plays greedily with a little noise. */
-  Board.prototype.bestMove = function (player, depth) {
+  Board.prototype.bestMove = function (player, depth, slack) {
     if (this.stones === 0) return (SIZE >> 1) * SIZE + (SIZE >> 1);
     var opp = 3 - player, i, m, hit;
 
@@ -258,7 +327,8 @@
       this.cells[moves[i]] = EMPTY;
       if (hit) return moves[i];
     }
-    // Otherwise stop an immediate loss.
+    /* Otherwise stop an immediate loss. Every level does this, however dim its
+       perception: a five is the one shape nobody fails to see. */
     for (i = 0; i < moves.length; i++) {
       this.cells[moves[i]] = opp;
       hit = this.isWinAt(moves[i]);
@@ -279,18 +349,21 @@
     var width = Math.max(12, widthFor(depth)); // the root always looks wide
     if (moves.length > width) moves.length = width;
 
-    var best = -Infinity, bestMoves = [], alpha = -Infinity;
+    /* Sampling needs a true score for every root move, so it leaves the window
+       open. Playing the best move only needs to know which one that is, so it
+       keeps the narrowing that makes the search quick. */
+    var scored = [], best = -Infinity, alpha = -Infinity;
     for (i = 0; i < moves.length; i++) {
       m = moves[i];
       this.place(m, player);
       var val = this.isWinAt(m)
         ? WIN_SCORE + depth
-        : -this.negamax(depth - 1, -Infinity, -alpha, opp);
+        : -this.negamax(depth - 1, -Infinity, slack > 0 ? Infinity : -alpha, opp);
       this.undo();
-      if (val > best) { best = val; bestMoves = [m]; alpha = val; }
-      else if (val === best) bestMoves.push(m);
+      scored.push({ cell: m, value: val });
+      if (val > best) { best = val; alpha = val; }
     }
-    return bestMoves[(Math.random() * bestMoves.length) | 0];
+    return pickWithin(scored, best, slack);
   };
 
   /* ---- notation ------------------------------------------------------- */

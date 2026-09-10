@@ -12,25 +12,36 @@ release under GPL-3.0, so the project fetches them instead of redistributing
 them. Run this once after cloning:
 
 ```
-get-engine.cmd
+get-engine.cmd      Windows
+./get-engine.sh     macOS and Linux
 ```
 
-It downloads release 250615 from the Rapfi project and unpacks the Windows
-builds, the NNUE weights and `config.toml` into `engine/`. Without it the page
-still runs, but falls back to the small built-in engine.
+It downloads release 250615 from the Rapfi project and unpacks the build for
+your platform, the NNUE weights and `config.toml` into `engine/`. Without it the
+page still runs, but falls back to the small built-in engine.
 
 ## Running it
 
-Double-click `play.bat`. It starts the bridge, waits for the port to answer and
-opens the board in Chrome as an app window (no tab strip or address bar), falling
-back to your default browser if Chrome is not installed.
+There is one launcher per platform and they take the same four words. Double-click
+`windows_play.bat`, or run `./mac_play.sh`. Either one starts the bridge, waits for
+the port to answer and opens the board as a tab in the Chrome you already have
+open, falling back to your default browser if Chrome is not installed.
 
 ```
-play.bat            start the bridge and open the board in Chrome
-play.bat stop       stop a running bridge
-play.bat rescan     forget the cached CPU build and probe again
-play.bat chrome     show which Chrome would be used, without opening it
+windows_play.bat            start the bridge and open the board in a Chrome tab
+windows_play.bat stop       stop a running bridge
+windows_play.bat rescan     forget the cached CPU build and probe again
+windows_play.bat chrome     show which Chrome would be used, without opening it
+
+./mac_play.sh               the same four, on macOS
 ```
+
+The board is an ordinary tab in your own profile, with your extensions and
+bookmarks, not a separate app window: Chrome hands a plain URL to the instance
+that is already running rather than starting a second one, and on macOS the
+launcher goes through `open -a` so it does. `./mac_play.sh chrome` prints which
+Chrome that would be. Its Linux paths are there too, though Linux is not what
+it is tested on.
 
 Or run `node server.js` yourself and open <http://127.0.0.1:8787>. Use
 `PORT=9000 node server.js` for a different port. The server binds to `127.0.0.1`
@@ -48,44 +59,55 @@ styles.css
 app.js            canvas rendering, input, game flow
 local-engine.js   fallback engine used when the bridge is not running
 server.js         static server + Piskvork protocol bridge to Rapfi
-play.bat          launcher
+windows_play.bat  launcher, Windows
+mac_play.sh       launcher, macOS
 engine/           Rapfi 0.43.01, from release 250615
 ```
 
 `engine/` was extracted from `Rapfi-engine.7z` (35.1 MB) on the
-[250615 release](https://github.com/dhbloo/rapfi/releases/tag/250615). It holds the
-five Windows builds, the NNUE weights (`mix9svq*.bin.lz4`), the classical weights
-(`model210901.bin`) and `config.toml`. Rapfi needs the weights and config beside
-the executable, so keep the folder together.
+[250615 release](https://github.com/dhbloo/rapfi/releases/tag/250615). That archive
+carries five Windows builds, five Linux builds and one macOS build, plus the NNUE
+weights (`mix9svq*.bin.lz4`), the classical weights (`model210901.bin`) and
+`config.toml`. The fetch scripts take only the builds for the platform they run
+on. Rapfi needs the weights and config beside the executable, so keep the folder
+together.
 
 ## Instruction-set builds
 
-Rapfi ships one binary per instruction set. `server.js` tries them strongest
-first (AVX512VNNI, AVX512, AVXVNNI, AVX2, SSE), and a build the CPU cannot run
-exits immediately, which is how the choice gets made. The winner is cached in
-`engine/selected-build.json`; delete that file to probe again after a hardware
-change.
+On x86 Rapfi ships one binary per instruction set. `server.js` tries them
+strongest first (AVX512VNNI, AVX512, AVXVNNI, AVX2, SSE), and a build the CPU
+cannot run exits immediately, which is how the choice gets made. The winner is
+cached in `engine/selected-build.json`; delete that file, or run the launcher's
+`rescan`, to probe again after a hardware change.
 
 On this machine (i7-13700K) the AVX-512 builds fail, as they should on
 consumer Raptor Lake, and **avxvnni** is selected.
+
+macOS is simpler: the release has a single `pbrain-rapfi-macos-apple-silicon`
+binary, so there is nothing to probe and it is used as-is. It is arm64 only —
+an Intel Mac has to build Rapfi from source or fall back to `local-engine.js`.
 
 ## Controls
 
 | | |
 |---|---|
-| Opponent | which colour Rapfi plays, two-player hotseat, tactics, or lessons |
-| Strength | Rapfi's `INFO strength`, 0-100 |
-| Think time | per-move limit, `INFO timeout_turn` |
-| Rule | freestyle (five or more), standard (exactly five), or renju |
+| Opponent | which colour Rapfi plays, two-player hotseat, or tactics |
+| Difficulty | how close to its best move the engine will settle for; see below |
+| Rule | renju (the default), freestyle (five or more), or standard (exactly five) |
 | Score my options | rank the best placements for the side to move, with an evaluation on each |
 | Tactics | the engine never plays a stone: you make every move for both sides and it scores each position as you go |
+| Sparring | the engine plays itself, paced so you can follow, holding on every mistake |
 | Hint | a switch: while it is on, the engine’s choice for the side to move is ringed, and it follows play |
+| Value map | a switch: a dot on every empty point that is worth something, sized by how much |
 | Theme | System, Light or Dark; the board follows the panel |
 | Evaluation bar | the vertical gauge beside the board; switch it off in the engine section |
+| History | the left panel’s second tab: every finished game, replayed on a numbered board |
+| View | Board, or Sheet - the spreadsheet skin; `Esc` flips between them |
 | Hide | collapses a panel; a tab on that edge of the window brings it back |
 
-`N` new game, `U` undo, `H` hint on or off. Undo takes back both plies when playing the
-engine. Scored options are drawn on the board and listed in the panel, and
+`N` new game, `U` undo, `H` hint on or off, `V` value map on or off, `←` `→`
+step through a replay, `Esc` switches view. Undo
+takes back both plies when playing the engine. Scored options are drawn on the board and listed in the panel, and
 clicking one plays it.
 
 **Undo all** wipes the whole game, so it is a press-and-hold rather than a
@@ -150,40 +172,42 @@ The phase word on the card is descriptive rather than canonical: opening for
 the first few stones, attack once the last move made a three or better, and
 middle game otherwise.
 
-## Lessons
+## History
 
-Pick **Lessons** as the opponent and the left panel becomes a menu of nine
-positions, each teaching one idea, in the order the ideas build on each other:
+Every game that reaches a result is kept, win or draw, and the left panel’s
+**History** tab lists them newest first:
 
-1. Make an open three
-2. Answer an open three
-3. Answer a four
-4. Make a four
-5. Make an open four
-6. The four-three fork
-7. The double three
-8. The double four
-9. Take the fork square first
+```
+  ● Black wins                    Sep 10 01:39 PM
+    31 moves · engine as White · freestyle
+```
 
-Each sets up a position and asks for one move. Play it on the board: a right
-answer stays and is explained, a wrong one is taken back so the position is
-there to try again, and the feedback names the shape the wrong move actually
-made. Solved lessons are remembered between sessions.
+Pick one and it is replayed on the board with the moves numbered in the order
+they were played — 1 Black, 2 White, 3 Black — so a finished game can be read
+off the board at a glance rather than reconstructed from a list:
 
-The lessons about a shape accept **any** move that makes it, not one blessed
-square, because the point is the shape. The lessons about answering a threat
-accept only the squares that genuinely answer it. Hint, while a lesson is
-open, rings the lesson answer rather than the engine choice, and option
-scoring is suppressed so it cannot contradict what is being taught. The
-engine plays no stones here, so lessons work with the bridge off.
+```
+        ⑤
+    ①  ③
+  ②  ④
+```
 
-Every lesson is checked by the test harness: it loads the position, confirms
-the stone counts put the right side to move, derives the accepted answers from
-the shape classifier, plays a deliberately wrong move and checks it is
-refused, then plays a real answer and checks it is accepted. That caught one
-position that had no reachable answer at all: what was meant to be a double
-four had both lines open, so the move made an open four instead, which is the
-stronger shape. Both lines are now blocked at one end.
+**Start**, **Back**, **Next** and **End** walk through it, `←` and `→` do the
+same from the keyboard, and clicking any move in the log jumps straight to it.
+The move being shown is ringed on the board and the moves still to come are
+dimmed in the log. The valuations are stored with the game, so the grades, the
+review line and the evaluation bar read as they did while it was played, and
+the card above the board still names the shape each move made.
+
+A replay takes the board over rather than drawing beside it. The game in
+progress is put aside when a replay opens and handed straight back when it
+closes, down to the grades and whose turn it is, so looking something up costs
+nothing. **New game** ends a replay the same way. While one is open the board
+is read-only and the engine is left alone.
+
+Games live in the browser’s local storage, fifty of them, oldest dropped
+first. Taking a move back and playing it again does not file the game twice.
+**Clear history** wipes the list and asks once before it does.
 
 ## Tactics mode and the move log
 
@@ -233,7 +257,8 @@ move list and the engine output read the same way.
 
 ## Rules
 
-Three rule sets, chosen in the Rule selector.
+Three rule sets, chosen in the Rule selector. **Renju is the default**, which
+means a fresh page opens on the tournament rule with Black restricted.
 
 **Freestyle** is plain gomoku: five or more in a row wins, for either side.
 
@@ -263,7 +288,10 @@ black four in a row reports no forbidden point at its fifth, while adding a
 stone that would make six does report one.
 
 Renju needs the bridge running. The option is disabled when the page falls back
-to the built-in engine, which cannot work forbidden points out.
+to the built-in engine, which cannot work forbidden points out. Because it is
+also the default, the page holds the choice while `api/status` is still in
+flight and restores it the moment Rapfi answers - otherwise the brief spell on
+the fallback engine at startup would silently drop every session to freestyle.
 
 ## Evaluation bar
 
@@ -290,11 +318,148 @@ so expect the gauge to swing hard once someone gets a real threat: that is the
 engine being decisive, not the bar being broken. An empty board leaves it
 blank, because Rapfi returns no evaluation before the first stone.
 
+## Difficulty
+
+The ladder is built two different ways, because one way does not reach the
+bottom of it.
+
+**Club and above are Rapfi**, handicapped by a `window`: how far below its own
+best move, in Rapfi's eval units, the move it plays may be. Every level searches
+at full strength for a real length of time; the window only decides which of
+what it found it settles for.
+
+| Difficulty | mechanism | think time |
+|---|---|---|
+| Beginner | perception table | 0.3 s |
+| Casual | perception table | 0.3 s |
+| Club | window 400 | 0.5 s |
+| Strong | window 100 | 0.8 s |
+| Full | window 0 — always the best move | 1.5 s |
+
+### Why a window cannot make a beginner
+
+It shuts exactly where the game is decided. When a four has to be blocked every
+other reply is worse by thousands, so the block is the only move inside any
+window and every level finds it. Measured, that made Beginner answer an open
+three 20/20 and a live four 20/20 — identical to Full.
+
+Nor does search depth, which is how chess engines do this. [Stockfish's Skill
+Level](https://github.com/official-stockfish/Stockfish/commit/ef4822aa8d5945d490acca674eb1db8c3c38e9d5)
+commits its move from the search at depth `1 + level`, then biases among MultiPV
+candidates. That works in chess. It does not work here: measured, **Rapfi answers
+an open three at `max_depth 1` exactly as it does at full depth**, because in
+gomoku the shape is visible in the static evaluation without any search at all.
+
+And randomly discarding the best move — which this did for a while — produces an
+opponent that plays well and then twitches. The errors land anywhere, which is
+not how a person is wrong. [KataGo's human-SL
+docs](https://github.com/lightvector/KataGo/releases/tag/v1.15.0) put the general
+version plainly: search with many visits and the engine "will still be stronger
+because the search will probably solve a lot of tactics that players of a weaker
+rank would not solve". The weakening has to be in what the player *sees*, not in
+what is done to the answer afterwards.
+
+### The perception table
+
+Beginner and Casual are the bundled engine reading the board through a table of
+what it takes each shape to be worth:
+
+| shape | true | Beginner reads it as |
+|---|---|---|
+| five | 5,000,000 | unchanged |
+| open four | 200,000 | ×0.05 |
+| four | 20,000 | unchanged |
+| open three | 8,000 | ×0.25 |
+| closed three | 900 | ×0.40 |
+| open two | 220 | ×0.60 |
+
+The load-bearing entry is **open four**, which is not obvious. Blocking an open
+three is worth what the opponent would gain by taking that point — and what they
+gain is an open *four*. So underrating open fours is what stops a player
+foreseeing that a three becomes one, which is precisely the beginner's blind
+spot. A four is still answered, because that is measured against a five, and
+`five` stays true for everyone: it is the one shape nobody fails to see.
+
+Measured over 40 tries per level:
+
+| | Beginner | Casual | Club and up |
+|---|---|---|---|
+| answers an open three | 0% | 48% | 100% |
+| answers a live four | 100% | 100% | 100% |
+| takes its own win in one | 100% | 100% | 100% |
+
+The mistake is a property of the position rather than of a roll of the dice: the
+same board draws the same error. Rapfi still reads every position even when it is
+not choosing the move, so the grading, the review line and the evaluation bar
+stay honest — the handicap is on who picks, never on what the coaching knows.
+
+Without Rapfi the same tables run offline unchanged; only the Rapfi levels fall
+back to plain search depth.
+
+## Sparring
+
+The engine playing itself, for watching rather than for playing. The obvious
+version of this is useless: two copies at full strength trade a long balanced
+game where nothing ever goes wrong, so there is nothing to see and no reason a
+move was good. What teaches is a mistake and its answer, one after the other.
+
+So a **Matchup** names a level for each side, and none of them is full against
+full:
+
+| Matchup | what you watch |
+|---|---|
+| Full vs Club | the stronger side punishes every slip - the clearest way to see why a move was bad |
+| Club vs Club | both sides err, so it comes from either direction |
+| Casual vs Casual | loose throughout, so the mistakes are easy to spot before they are answered |
+| Difficulty setting, both sides | the escape hatch; it says so if you point it at Full vs Full |
+
+**Pace** sets the gap between moves. **Stop on mistakes** holds the game the
+moment a side plays a Mistake or a Blunder - and holds it *before* the answer is
+played, so there is a moment to look at the position and work out the punishment
+yourself. **Step** then plays the answer alone; **Play** carries on.
+
+The grade for a move is only known once the next search comes back, so the stop
+runs a move late by nature, which is exactly what is wanted here. The ply it
+stopped on is remembered: the grade that caused the stop is still sitting there
+afterwards, and without that memory carrying on would trip the same stop again
+and the game could never be resumed past a mistake.
+
+While a fixed matchup is set, the Difficulty dial has nothing to say and is
+disabled, rather than sitting there looking as though it still applies.
+
+## Value map
+
+The **Value map** switch puts a dot on every empty point that is worth
+something, sized by how much: what a stone there would build for the side to
+move, plus what it would deny the other side. It answers a different question
+from the scored options. Those rank moves; this shows the shape of the whole
+position, so the eye lands on the part of the board where the game is being
+decided before it worries about which point in it to take.
+
+Both halves are read off `local-engine.js`'s pattern tables, the same ones that
+order its search, so the map costs Rapfi nothing, redraws instantly and works
+with no engine at all. It is a count of shapes rather than a search, so it does
+not see a combination coming and can disagree with the engine's own choice. When
+it does, the disagreement is worth looking at: usually the engine has read
+something the shapes alone do not show.
+
+Pattern values run from 4 for a lone stone to five million for a five in a row,
+so a dot drawn in proportion to the raw number would leave everything but the
+hottest point invisible. Each point is sized by its share of the best point on
+the board, pulled together by a cube root: half the value is still four fifths
+of the width, a hundredth of it a fifth. Points worth less than a sixth of the
+top one are left off. So the dots compare with each other and not across
+positions: the biggest dot is wherever the game is hottest right now, whether
+that is a five waiting to be played or a quiet opening. In a sharp position only
+a handful survive, which is itself the point being made.
+
 ## Layout
 
 Three columns: the move list on the left at 252px, the board in the middle,
 the controls on the right. The move list moved out of the right panel because that
-panel was growing long enough to push the page around.
+panel was growing long enough to push the page around. The left panel has two
+tabs, the moves of the game in progress and the history of finished ones, so
+the second list costs no width.
 
 The app is pinned to the viewport height, so each panel scrolls inside itself
 and the page as a whole never scrolls. Two things were needed for that: the
@@ -313,19 +478,19 @@ collapsed so the tab never covers it.
 
 ## Window size
 
-The board is clamped at both ends rather than tracking the window without
-limit. It never grows past `--board-max`, which is 990px in `styles.css` and is the
-one value to change if you want it bigger or smaller, and it never shrinks
-below 300px, where the pane scrolls instead. One custom property drives both
-the board and the evaluation bar beside it, so they always match.
+The board takes a share of the room it could have rather than filling it. The
+room available is whichever runs out first, the board pane's width or the
+window's height; `--board-fill` in `styles.css` is how much of that the board
+takes, and at 0.75 a 1512x777 window gives a 547px board. That one number is
+what to change to make the board bigger or smaller.
+
+It is then clamped at both ends: never past `--board-max` (990px), and never
+below 300px, where the pane scrolls instead. One custom property drives both the
+board and the evaluation bar beside it, so they always match.
 
 The panel keeps its full width, and under 760px wide it moves below the board.
 Past the floor the page scrolls rather than squeezing everything into nothing,
 so dragging the window around cannot leave it in an unusable state.
-
-A side effect of the ceiling: on a large window there is now real clearance
-around the board, so the coaching card in the corner of the pane no longer
-sits over it.
 
 ## Licensing
 

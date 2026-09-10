@@ -36,4 +36,4 @@ if errorlevel 1 (
 
 del "%ARCHIVE%" >nul 2>nul
 echo.
-echo Done. Run play.bat to start.
+echo Done. Run windows_play.bat to start.

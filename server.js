@@ -23,12 +23,47 @@ const CACHE_FILE = path.join(ENGINE_DIR, 'selected-build.json');
 const PORT = Number(process.env.PORT) || 8787;
 
 /* Best instruction set first. A build the CPU cannot run dies immediately with
-   an illegal-instruction exit, which is how the vendor suggests detecting it. */
-const BUILDS = ['avx512vnni', 'avx512', 'avxvnni', 'avx2', 'sse'];
+   an illegal-instruction exit, which is how the vendor suggests detecting it.
+   The macOS release is a single Apple Silicon binary, so there is nothing to
+   probe there. */
+const X86_BUILDS = ['avx512vnni', 'avx512', 'avxvnni', 'avx2', 'sse'];
+const BUILDS = process.platform === 'darwin' ? ['apple-silicon'] : X86_BUILDS;
 
 const RULES = { freestyle: 0, standard: 1, renju: 4 };
 
+
+/* Gomocup notation, the form Rapfi prints a principal variation in: column
+   letters A-O with 'I' included, row 1 at the bottom. */
+const COLUMNS = 'ABCDEFGHIJKLMNO';
+
+function pointFromCoord(token) {
+  const m = /^([A-O])(\d{1,2})$/i.exec(String(token || ''));
+  if (!m) return null;
+  const x = COLUMNS.indexOf(m[1].toUpperCase());
+  const y = Number(m[2]) - 1;
+  return x >= 0 && y >= 0 ? { x, y } : null;
+}
+
+/* Rapfi reports a mate as "M12" / "-M12" and everything else as a number.
+   Mates sort outside every ordinary score, the nearer ones first, so that a
+   won position never falls inside a sampling window next to a lost one. */
+function evalToNumber(text) {
+  const m = /^([+-]?)M(\d+)$/i.exec(String(text));
+  if (m) {
+    const mag = 1e6 - Number(m[2]);
+    return m[1] === '-' ? -mag : mag;
+  }
+  const n = Number(text);
+  return Number.isFinite(n) ? n : 0;
+}
+
 function exeFor(tag) {
+  if (process.platform === 'darwin') {
+    return path.join(ENGINE_DIR, 'pbrain-rapfi-macos-' + tag);
+  }
+  if (process.platform === 'linux') {
+    return path.join(ENGINE_DIR, 'pbrain-rapfi-linux-clang-' + tag);
+  }
   return path.join(ENGINE_DIR, 'pbrain-rapfi-windows-' + tag + '.exe');
 }
 
@@ -53,6 +88,14 @@ function makeInfoCollector() {
     if (sawDepth && pv) info.pv = pv;
   };
   return { info, collect };
+}
+
+/* Odds of picking a candidate: full weight on the best move, tailing off to a
+   small share at the far edge of the window, so no move inside it is ever
+   impossible and the best one is always the most likely. */
+function weightFor(candidate, top, slack) {
+  if (slack <= 0) return 1;
+  return 0.15 + 0.85 * (1 - (top - candidate.value) / slack);
 }
 
 /* ------------------------------------------------------------------ engine */
@@ -228,6 +271,54 @@ class Rapfi {
     }
   }
 
+  /* Pick a move the way a weaker player would: search at full strength, then
+     take something from the top of the list rather than always the very best.
+     `window` is how far below the best move, in Rapfi's eval units, a move may
+     be and still be considered - 0 is the engine's own choice every time.
+
+     Working in eval units rather than in ranks is what keeps the weak levels
+     playable. A rank-based handicap ("play the third best move") throws games
+     away, because in a forcing position the third best move loses on the spot.
+     A window does not: when a four has to be blocked, every other reply is
+     worse by thousands, so the window holds one move and the engine blocks,
+     whatever the level. It only spreads out when the position genuinely offers
+     several reasonable moves, which is exactly where a weaker player differs.
+
+     Within the window the odds fall off towards the edge, so a level plays
+     near-best more often than not and drifts rather than lurching. */
+  async choose(opts) {
+    const { size, rule, stones, engineColor, timeoutMs, window: slack } = opts;
+    const { best, candidates, info } = await this.analyze({
+      size, rule, stones, sideToMove: engineColor, timeoutMs,
+      count: Math.max(2, Math.min(20, Math.round(slack / 60) + 3))
+    });
+
+    const scored = candidates.map(c => ({
+      point: pointFromCoord(c.pv && c.pv[0]),
+      value: evalToNumber(c.eval)
+    })).filter(c => c.point);
+    scored.sort((a, b) => b.value - a.value);
+
+    // A position Rapfi resolves by force reports no ranked list at all.
+    if (!scored.length) return { move: best, info };
+
+    /* This handicaps a good player, not a weak one: the window shuts on its own
+       exactly where the game is decided, since when a four has to be blocked
+       every other reply is worse by thousands and the block is the only move
+       inside it. That is right for the levels this serves. Making a beginner
+       needs a different mechanism entirely, and it lives in the bundled engine
+       rather than here - see the difficulty notes in app.js. */
+    const top = scored[0].value;
+    const inWindow = scored.filter(c => top - c.value <= slack);
+
+    let roll = Math.random() * inWindow.reduce((sum, c) => sum + weightFor(c, top, slack), 0);
+    for (const c of inWindow) {
+      roll -= weightFor(c, top, slack);
+      if (roll <= 0) return { move: c.point, info };
+    }
+    return { move: inWindow[0].point, info };
+  }
+
   /* Renju forbids Black double threes, double fours and overlines, with the
      recursive twist that a three only counts if the move completing it into an
      open four is itself legal. Rather than re-derive that, ask the engine:
@@ -277,6 +368,11 @@ class Rapfi {
 function probeBuild(tag) {
   return new Promise(resolve => {
     if (!fs.existsSync(exeFor(tag))) return resolve(null);
+    /* A hand-unpacked archive can arrive without the executable bit, which
+       would otherwise look just like a CPU that cannot run the build. */
+    if (process.platform !== 'win32') {
+      try { fs.chmodSync(exeFor(tag), 0o755); } catch (e) {}
+    }
     let out = '', settled = false;
     const proc = spawn(exeFor(tag), [], { cwd: ENGINE_DIR });
     const finish = ok => {
@@ -404,12 +500,13 @@ const server = http.createServer(async (req, res) => {
       const stones = Array.isArray(body.stones) ? body.stones : [];
       const engineColor = body.engineColor === 2 ? 2 : 1;
       const timeoutMs = Math.min(120000, Math.max(50, Number(body.timeoutMs) || 1000));
-      const strength = Math.min(100, Math.max(0, Number(body.strength)));
+      const window = Math.min(100000, Math.max(0, Number(body.window) || 0));
 
-      const result = await engine.run(() => engine.think({
-        size, rule, stones, engineColor, timeoutMs,
-        strength: Number.isFinite(strength) ? strength : 100
-      }));
+      /* At the top level there is nothing to sample from, so the plain search
+         is both the right answer and the cheaper way to get it. */
+      const result = await engine.run(() => window > 0
+        ? engine.choose({ size, rule, stones, engineColor, timeoutMs, window })
+        : engine.think({ size, rule, stones, engineColor, timeoutMs, strength: 100 }));
       return sendJson(res, 200, result);
     } catch (err) {
       return sendJson(res, 500, { error: err.message });

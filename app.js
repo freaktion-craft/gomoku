@@ -20,7 +20,14 @@
     white: '--stone-white',
     whiteEdge: '--stone-white-edge',
     hint: '--marker',
-    win: '--win'
+    win: '--win',
+    sheetHeader: '--sheet-header',
+    sheetPos: '--sheet-pos',
+    sheetNeg: '--sheet-neg',
+    sheetActive: '--sheet-active',
+    sheetHover: '--sheet-hover',
+    sheetHeat: '--sheet-heat',
+    sheetSelect: '--sheet-select'
   };
 
   function refreshColors() {
@@ -35,15 +42,18 @@
   var canvas = document.getElementById('board');
   var ctx = canvas.getContext('2d');
   var els = {};
-  ['statusText', 'statusMeta', 'turnDot', 'engineBadge', 'mode', 'level', 'thinkTime',
-   'rule', 'newGame', 'undo', 'undoAll', 'hint', 'movelog', 'analysis',
+  ['statusText', 'statusMeta', 'turnDot', 'engineBadge', 'mode', 'difficulty', 'difficultyNote',
+   'rule', 'newGame', 'undo', 'undoAll', 'hint', 'valueMap', 'movelog', 'analysis',
    'anDepth', 'anEval', 'anNodes', 'anSpeed', 'anPv', 'nbest', 'candList',
    'review', 'theme', 'renjuOption', 'coachPhase', 'coachNote',
    'prevMove', 'prevShape', 'curMove', 'curShape', 'coachPrev',
    'boardStack', 'evalBar', 'evalFill', 'evalNumWhite', 'evalNumBlack',
-   'evalBarToggle', 'panelToggle', 'panelTab', 'panelLeft', 'leftToggle', 'leftTab', 'leftTitle',
-   'lessons', 'lessonList', 'lessonTitle', 'lessonBrief', 'lessonFeedback',
-   'lessonRetry', 'lessonNext'].forEach(function (id) {
+   'evalBarToggle', 'panelToggle', 'panelTab', 'panelLeft', 'leftToggle', 'leftTab',
+   'skin', 'favicon', 'demoControls', 'demoMatch', 'demoNote', 'demoPace',
+   'demoPlay', 'demoStep', 'demoStopOnError', 'engineFold', 'keysFold',
+   'tabMoves', 'tabHistory', 'history', 'gameList', 'historyClear',
+   'replay', 'replayTitle', 'replayLog', 'replayStart', 'replayPrev',
+   'replayNext', 'replayEnd', 'replayClose'].forEach(function (id) {
     els[id] = document.getElementById(id);
   });
 
@@ -68,13 +78,18 @@
     shapes: [],         // shapes[i] names what history[i] created
     hintOn: false,
     evalBarOn: true,
-    lesson: -1,         // index into LESSONS, -1 when none is loaded
-    lessonSolved: false,
-    lessonNote: '',
-    lessonDone: {},
+    valueMapOn: false,
+    stopOnError: true,  // sparring: hold the game when a side errs
+    valueMap: [],       // empty points worth marking, and how much each is worth
+    games: [],          // finished games, newest first
+    tab: 'moves',       // which list the left panel shows
+    replay: null,       // the game being replayed, and the live game it displaced
     whiteRate: null,    // white's share of the win chance, 0 to 1
     panelOpen: true,
     leftOpen: true,
+    skin: 'classic',    // 'sheet' disguises the whole page as a spreadsheet
+    demoPaused: false,  // sparring: the game is held, waiting to be stepped on
+    stoppedAt: -1,      // and the ply it was held on, so it holds there once
     metrics: null
   };
 
@@ -135,6 +150,299 @@
     return 'Blunder';
   }
 
+
+  /* ---- skins --------------------------------------------------------------
+     The board skin also renames everything on the page, because a disguised
+     board beside a panel reading "Black to move" fools nobody. Fixed strings
+     carry their replacement in a data-sheet attribute in the HTML, next to the
+     words they stand in for; anything render() rewrites is looked up here.
+
+     Nothing about the game changes - the same engine, the same rules, the same
+     coordinates underneath. Escape flips it either way, without going near the
+     control, which is the point of having it. */
+
+  var PLAIN_TITLE = document.title;
+
+  var WORDS = {
+    classic: {
+      title: PLAIN_TITLE,
+      black: 'Black', white: 'White',
+      toMove: ' to move', wins: ' wins', draw: 'Draw',
+      unit: 'Move', thinking: 'Engine is thinking', analysing: 'Analysing',
+      hintOn: 'Hint on', hintOff: 'Hint off',
+      mapOn: 'Value map on', mapOff: 'Value map off',
+      barOn: 'Evaluation bar on', barOff: 'Evaluation bar off',
+      clear: 'Undo all', clearList: 'Clear history', clearSure: 'Clear all · sure?',
+      replay: 'Replay · '
+    },
+    sheet: {
+      title: 'Q3_forecast_v7.xlsx',
+      badge: 'linked · autosaved',
+      black: 'Actual', white: 'Budget',
+      toMove: ' to enter', wins: ' reconciled', draw: 'Sheet full',
+      unit: 'Edit', thinking: 'Recalculating', analysing: 'Recalculating',
+      hintOn: 'Suggest on', hintOff: 'Suggest off',
+      mapOn: 'Heatmap on', mapOff: 'Heatmap off',
+      barOn: 'Variance bar on', barOff: 'Variance bar off',
+      clear: 'Clear sheet', clearList: 'Clear versions', clearSure: 'Clear all · sure?',
+      replay: 'Version · '
+    }
+  };
+
+  /* The vocabulary of threats has no place on a sheet, so each shape gets a
+     reading of the figures that says the same thing about the position. */
+  var SHEET_SHAPE = {
+    'five in a row':  { name: 'target met',           note: 'the sheet is closed' },
+    'open four':      { name: 'two paths to target',  note: 'both remain open, so it cannot be offset' },
+    'double four':    { name: 'two paths to target',  note: 'only one of the two can be offset' },
+    'four-three':     { name: 'compound driver',      note: 'the first must be answered, then the second lands' },
+    'double three':   { name: 'two drivers',          note: 'only one of the two can be answered' },
+    'four':           { name: 'one step from target', note: 'forces an entry on the closing cell' },
+    'open three':     { name: 'trending to target',   note: 'reaches two paths unless it is offset' },
+    'closed three':   { name: 'trend capped',         note: 'blocked one side, not yet forcing' },
+    'open two':       { name: 'early trend',          note: 'quiet build towards a driver' },
+    'quiet move':     { name: 'no movement',          note: 'no variance yet' }
+  };
+
+  var SHEET_GRADE = {
+    Best: 'Optimal', Good: 'On plan', Inaccuracy: 'Minor variance',
+    Mistake: 'Variance', Blunder: 'Material variance'
+  };
+
+  var SHEET_PHASE = { opening: 'draft', 'middle game': 'in progress', attack: 'variance', finished: 'closed' };
+
+  /* Tab icons. Data URIs rather than files, so a skin is still one stylesheet
+     and one script. */
+  var ICONS = {
+    classic: 'data:image/svg+xml,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">' +
+      '<rect width="16" height="16" rx="2" fill="%23e6e4df"/>' +
+      '<circle cx="8" cy="8" r="4.5" fill="%2317171a"/></svg>'),
+    sheet: 'data:image/svg+xml,' + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">' +
+      '<rect width="16" height="16" rx="2" fill="%23107c41"/>' +
+      '<g stroke="%23ffffff" stroke-width="1.1">' +
+      '<path d="M2 6h12M2 10h12M6.5 3v10M11 3v10"/></g></svg>')
+  };
+
+  function isSheet() { return state.skin === 'sheet'; }
+  function L(key) { return WORDS[state.skin][key]; }
+
+  function shapeText(shape) {
+    if (!shape) return null;
+    return isSheet() ? (SHEET_SHAPE[shape.name] || shape) : shape;
+  }
+
+  function gradeText(grade) {
+    return isSheet() ? (SHEET_GRADE[grade] || grade) : grade;
+  }
+
+  /* Fixed strings swap in place, their originals kept on the node so flipping
+     back needs no second table. */
+  function applySkinText(on) {
+    var nodes = document.querySelectorAll('[data-sheet]'), i, el;
+    for (i = 0; i < nodes.length; i++) {
+      el = nodes[i];
+      if (el.getAttribute('data-plain') === null) {
+        el.setAttribute('data-plain', el.textContent);
+      }
+      el.textContent = on ? el.getAttribute('data-sheet') : el.getAttribute('data-plain');
+    }
+  }
+
+  function applySkin(skin) {
+    state.skin = skin === 'sheet' ? 'sheet' : 'classic';
+    if (isSheet()) document.documentElement.setAttribute('data-skin', 'sheet');
+    else document.documentElement.removeAttribute('data-skin');
+    els.skin.value = state.skin;
+    document.title = L('title');
+    els.favicon.setAttribute('href', ICONS[state.skin]);
+    applySkinText(isSheet());
+    refreshColors();
+    layout();          // the sheet spends more of the canvas on its header band
+    render();
+  }
+
+  function setSkin(skin) {
+    applySkin(skin);
+    store(SKIN_KEY, state.skin);
+  }
+
+  /* How a point is written in the panel, following whichever way the board is
+     currently numbering its rows. */
+  function coordText(cell) {
+    if (cell == null || cell < 0) return '';
+    if (!isSheet()) return G.toCoord(cell);
+    return G.COLUMNS[colOf(cell)] + (rowOf(cell) + 1);
+  }
+
+  function pvText(pv) {
+    if (!isSheet()) return pv.join(' ');
+    return pv.map(function (token) {
+      var cell = cellFromCoord(token);
+      return cell >= 0 ? coordText(cell) : token;
+    }).join(' ');
+  }
+
+
+  /* ---- sparring -----------------------------------------------------------
+     The engine playing itself, for watching rather than for playing. The point
+     is to learn from it, which rules out the obvious version: two copies at
+     full strength trade a long balanced game where nothing ever goes wrong, so
+     there is nothing to see and no reason a move was good. What teaches is a
+     mistake and its answer, one after the other.
+
+     So a matchup names a level for each side, and none of them is full against
+     full. The best of them is deliberately lopsided: the stronger side punishes
+     every slip, which is the clearest way to see why a slip was one. */
+
+  var MATCHUPS = {
+    'full-club':     { black: 'full',   white: 'club' },
+    'club-club':     { black: 'club',   white: 'club' },
+    'casual-casual': { black: 'casual', white: 'casual' },
+    'difficulty':    null                 // both sides take the Difficulty dial
+  };
+
+  var MATCH_NOTE = {
+    'full-club':     'Black punishes every slip White makes. The clearest way to see why a move was bad.',
+    'club-club':     'Both sides err, so the mistakes and the answers come from either direction.',
+    'casual-casual': 'Loose play throughout, which makes the mistakes easy to spot before they are answered.'
+  };
+
+  function isDemo() { return els.mode.value === 'demo'; }
+
+  function matchup() { return MATCHUPS[els.demoMatch.value] || null; }
+
+  /* Which settings a given side plays by. Outside sparring there is only one
+     opponent, so both answers are the Difficulty dial. */
+  function levelFor(color) {
+    var m = isDemo() ? matchup() : null;
+    if (!m) return difficulty();
+    return DIFFICULTY[color === BLACK ? m.black : m.white] || difficulty();
+  }
+
+  function demoNoteText() {
+    var m = matchup();
+    if (m) return MATCH_NOTE[els.demoMatch.value] || '';
+    if (els.difficulty.value === 'full') {
+      return 'Two perfect players trade a balanced game with nothing to punish. ' +
+             'Pick a lower Difficulty, or one of the matchups above.';
+    }
+    return 'Both sides at the current Difficulty setting.';
+  }
+
+  var demoTimer = 0;
+
+  function clearDemoTimer() {
+    if (demoTimer) { window.clearTimeout(demoTimer); demoTimer = 0; }
+  }
+
+  function scheduleDemoMove() {
+    clearDemoTimer();
+    var wait = Number(els.demoPace.value) || 0;
+    demoTimer = window.setTimeout(function () {
+      demoTimer = 0;
+      maybeEngineMove();
+    }, wait);
+  }
+
+  function setDemoPaused(paused) {
+    state.demoPaused = !!paused;
+    if (state.demoPaused) clearDemoTimer();
+    render();
+    if (!state.demoPaused) settle();
+  }
+
+  /* One move, then hold again. */
+  function demoStep() {
+    if (!isDemo() || state.over || state.thinking) return;
+    state.demoPaused = true;
+    clearDemoTimer();
+    maybeEngineMove();
+  }
+
+  /* Whether the move just graded is worth stopping on. The grade is only known
+     once the next search comes back, so this runs a move late by nature - which
+     is what we want, since it holds the board on the mistake itself, before the
+     answer to it is played.
+
+     The ply it stopped on is remembered, because the grade that caused the stop
+     is still sitting there afterwards: without this, carrying on would trip the
+     same stop again and the game could never be resumed past a mistake. */
+  function worthStopping() {
+    if (!isDemo() || !state.stopOnError) return false;
+    if (state.stoppedAt === board.history.length) return false;
+    var g = state.grades[board.history.length - 1];
+    return !!g && (g.grade === 'Mistake' || g.grade === 'Blunder');
+  }
+
+  /* ---- difficulty --------------------------------------------------------
+     How well the engine plays, as one dial. It never searches less hard: every
+     level reads the position at full strength and for a real length of time.
+     What changes is which of the moves it found it then plays.
+
+     The ladder is built two different ways, because one way does not reach the
+     bottom of it.
+
+     Club and above are Rapfi, handicapped by a `window`: how far below its own
+     best move, in Rapfi's eval units, the move it plays may be. That keeps a
+     good player's weakness coherent, since it can only ever pick from moves the
+     engine has already read and understood.
+
+     A window cannot make a beginner, though, because it shuts exactly where the
+     game is decided: when a four has to be blocked every other reply is worse by
+     thousands, so the block is the only move inside any window. Nor can search
+     depth, which is how chess engines do this - measured here, Rapfi answers an
+     open three at max_depth 1 exactly as it does at full depth, because in
+     gomoku the shape is visible without any search at all. And randomly
+     discarding the best move, which was the first thing tried here, produces an
+     opponent that plays well and then twitches: the errors land anywhere, which
+     is not how a person is wrong.
+
+     So Beginner and Casual are the bundled engine reading the board through a
+     perception table - what they take each shape to be worth. Lower the value
+     of an open four and the player stops foreseeing that an open three becomes
+     one, which is exactly the beginner's blind spot, while a four is still
+     answered because that is measured against a five. The mistake is a property
+     of the position rather than of a roll of the dice: the same board always
+     draws the same error, and the errors land where a beginner's land.
+
+     `depth` is how far the bundled engine looks, used by the perception levels
+     and by every level when there is no Rapfi to reach.
+
+     The eval numbers come from measuring real play: repeating the engine's own
+     choice still shows a loss near 100 because two searches stop at different
+     depths, and the tenth-best move in a balanced position costs about 430. */
+
+  /* `sees` is a perception table: what the side reads each shape as being
+     worth, against what it is worth. `window` is the eval slack a Rapfi level
+     will settle for. A level uses one or the other, never both. */
+  var DIFFICULTY = {
+    beginner: { sees: { openFour: 0.05, openThree: 0.25, closedThree: 0.40, openTwo: 0.6 },
+                depth: 1, timeoutMs: 300 },
+    casual:   { sees: { openFour: 0.10, openThree: 0.45, closedThree: 0.60, openTwo: 0.8 },
+                depth: 1, timeoutMs: 300 },
+    club:     { window: 400, timeoutMs: 500,  depth: 3 },
+    strong:   { window: 100, timeoutMs: 800,  depth: 4 },
+    full:     { window: 0,   timeoutMs: 1500, depth: 6 }
+  };
+
+  /* Said plainly under the control, because "weaker" here does not mean what it
+     usually means: the engine is not thinking less, it is settling for less. */
+  var DIFFICULTY_NOTE = {
+    beginner: 'Answers a four, but walks straight past an open three.',
+    casual:   'Answers a four, and spots about half the open threes.',
+    club:     'Answers everything, and takes the second-best line often enough.',
+    strong:   'Answers everything, and is rarely off the best move.',
+    full:     'Always plays the best move it finds.'
+  };
+
+  var ANALYSIS_MS = 1000;
+
+  function difficulty() {
+    return DIFFICULTY[els.difficulty.value] || DIFFICULTY.full;
+  }
+
   /* Rapfi if server.js answers, otherwise the bundled engine. */
   var backend = { kind: 'local', label: 'Built-in engine (offline)' };
 
@@ -153,10 +461,14 @@
   /* Who has to make exactly five. Freestyle lets both sides win with five or
      more; standard requires exactly five from both; renju restricts Black only,
      so an overline wins for White but is forbidden for Black. */
-  function needsExactFive(player) {
-    if (els.rule.value === 'standard') return true;
-    if (els.rule.value === 'renju') return player === BLACK;
+  function exactFiveUnder(rule, player) {
+    if (rule === 'standard') return true;
+    if (rule === 'renju') return player === BLACK;
     return false;
+  }
+
+  function needsExactFive(player) {
+    return exactFiveUnder(els.rule.value, player);
   }
 
   /* "J10" as printed by Rapfi -> a cell index. */
@@ -201,7 +513,8 @@
   function layout() {
     var css = canvas.getBoundingClientRect();
     var side = Math.max(160, Math.min(css.width, css.height));
-    var pad = Math.round(side * 0.055);
+    // The sheet spends its margin on the header band, so it needs a wider one.
+    var pad = Math.round(side * (isSheet() ? 0.085 : 0.055));
     var step = (side - pad * 2) / (SIZE - 1);
     state.metrics = { side: side, pad: pad, step: step, stone: step * 0.44 };
     return state.metrics;
@@ -231,8 +544,136 @@
     draw();
   }
 
+
+  /* ---- the spreadsheet skin ----------------------------------------------
+     A skin repaints the board and nothing else. Cells are centred on the very
+     points the game is played on, so the coordinate system, the hit testing and
+     every rule stay exactly as they were: only what is drawn on top changes.
+
+     Two conventions have to give way to the sheet, though, or it stops being
+     convincing. Headers go across the top and down the left rather than along
+     the bottom and right, and rows count 1 downwards instead of 15 upwards -
+     a sheet whose row numbers decrease is the one thing that would give it
+     away. `coordText` follows the same rule so the panel and the board agree. */
+
+  var SHEET_COLUMNS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+
+  function sheetFont(scale, weight) {
+    return (weight ? weight + ' ' : '') +
+           Math.max(8, Math.round(state.metrics.step * scale)) +
+           'px -apple-system, "Segoe UI", Roboto, sans-serif';
+  }
+
+  function cellBox(cell) {
+    var m = state.metrics, half = m.step / 2;
+    return { x: px(colOf(cell)) - half, y: px(rowOf(cell)) - half, w: m.step, h: m.step };
+  }
+
+  function fillCell(cell, color, alpha) {
+    var b = cellBox(cell);
+    ctx.save();
+    if (alpha != null) ctx.globalAlpha = alpha;
+    ctx.fillStyle = color;
+    ctx.fillRect(b.x, b.y, b.w, b.h);
+    ctx.restore();
+  }
+
+  function outlineCell(cell, color, width, dash) {
+    var b = cellBox(cell);
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    if (dash) ctx.setLineDash(dash);
+    ctx.strokeRect(b.x + width / 2, b.y + width / 2, b.w - width, b.h - width);
+    ctx.restore();
+  }
+
+  /* An ordinary-looking figure for a cell, derived from the cell index alone so
+     that a point always reads the same and the sheet never reshuffles itself
+     under the player. */
+  function sheetValue(cell) {
+    return 0.4 + ((cell * 73 + 41) % 92) / 10;
+  }
+
+  function sheetText(cell, player) {
+    if (isReplaying()) {
+      var n = board.history.indexOf(cell);
+      if (n >= 0) return String(n + 1);
+    }
+    return (player === BLACK ? '' : '-') + sheetValue(cell).toFixed(1);
+  }
+
+  /* Cell edges, carried on past the playing area so the sheet looks like it
+     continues off the screen instead of stopping in a tidy square. */
+  function sheetEdges() {
+    var m = state.metrics, out = [], v;
+    for (v = px(0) - m.step / 2; v > -m.step; v -= m.step) out.push(v);
+    for (v = px(0) + m.step / 2; v < m.side + m.step; v += m.step) out.push(v);
+    return out.sort(function (a, b) { return a - b; });
+  }
+
+  function paintSheet() {
+    var m = state.metrics, edges = sheetEdges(), i, v;
+    var head = px(0) - m.step / 2;      // the margin is the header band
+
+    ctx.fillStyle = COLOR.board;
+    ctx.fillRect(0, 0, m.side, m.side);
+
+    ctx.fillStyle = COLOR.sheetHeader;
+    ctx.fillRect(0, 0, m.side, head);
+    ctx.fillRect(0, 0, head, m.side);
+
+    ctx.strokeStyle = COLOR.grid;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (i = 0; i < edges.length; i++) {
+      v = Math.round(edges[i]) + 0.5;
+      ctx.moveTo(head, v); ctx.lineTo(m.side, v);
+      ctx.moveTo(v, head); ctx.lineTo(v, m.side);
+    }
+    ctx.stroke();
+
+    ctx.strokeStyle = COLOR.gridEdge;
+    ctx.beginPath();
+    for (i = 0; i < edges.length; i++) {
+      v = Math.round(edges[i]) + 0.5;
+      ctx.moveTo(v, 0); ctx.lineTo(v, head);
+      ctx.moveTo(0, v); ctx.lineTo(head, v);
+    }
+    v = Math.round(head) + 0.5;
+    ctx.moveTo(0, v); ctx.lineTo(m.side, v);
+    ctx.moveTo(v, 0); ctx.lineTo(v, m.side);
+    ctx.stroke();
+
+    ctx.fillStyle = COLOR.label;
+    ctx.font = sheetFont(0.32, '600');
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (i = 0; i < edges.length - 1; i++) {
+      var mid = (edges[i] + edges[i + 1]) / 2;
+      var idx = Math.round((mid - px(0)) / m.step);
+      if (idx < 0 || idx >= SHEET_COLUMNS.length || mid < head) continue;
+      ctx.fillText(SHEET_COLUMNS[idx], mid, head / 2);
+      ctx.fillText(String(idx + 1), head / 2, mid);
+    }
+  }
+
+  function drawSheetValue(cell, player, alpha) {
+    var m = state.metrics;
+    ctx.save();
+    if (alpha != null) ctx.globalAlpha = alpha;
+    ctx.fillStyle = player === BLACK ? COLOR.sheetPos : COLOR.sheetNeg;
+    ctx.font = sheetFont(0.34);
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    // Against the right edge of the cell, the way a sheet aligns a number.
+    ctx.fillText(sheetText(cell, player), px(colOf(cell)) + m.step * 0.40, px(rowOf(cell)));
+    ctx.restore();
+  }
+
   function drawStone(cell, player, alpha) {
     var m = state.metrics;
+    if (isSheet()) { drawSheetValue(cell, player, alpha); return; }
     ctx.save();
     if (alpha != null) ctx.globalAlpha = alpha;
     ctx.beginPath();
@@ -245,10 +686,27 @@
     ctx.restore();
   }
 
-  function draw() {
-    var m = state.metrics;
-    if (!m) return;
-    var i, p;
+  /* The order the stones went down, written on them: 1 is Black's first, 2 is
+     White's reply, and so on, so a finished game can be read off the board.
+     Three digits get a smaller face so they still fit inside the stone. */
+  function drawMoveNumbers() {
+    var m = state.metrics, hist = board.history;
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (var i = 0; i < hist.length; i++) {
+      var label = String(i + 1);
+      var scale = label.length > 2 ? 0.66 : (label.length > 1 ? 0.88 : 1.05);
+      ctx.font = '600 ' + Math.max(7, Math.round(m.stone * scale)) +
+                 'px -apple-system, "Segoe UI", Roboto, sans-serif';
+      ctx.fillStyle = board.cells[hist[i]] === BLACK ? COLOR.white : COLOR.black;
+      ctx.fillText(label, px(colOf(hist[i])), px(rowOf(hist[i])));
+    }
+    ctx.restore();
+  }
+
+  function paintBoard() {
+    var m = state.metrics, i, p;
 
     ctx.fillStyle = COLOR.board;
     ctx.fillRect(0, 0, m.side, m.side);
@@ -288,51 +746,105 @@
       ctx.fillText(G.COLUMNS[i], px(i), m.side - m.pad * 0.45);
       ctx.fillText(String(SIZE - i), m.side - m.pad * 0.45, px(i));
     }
+  }
+
+  function draw() {
+    var m = state.metrics;
+    if (!m) return;
+    var i;
+
+    if (isSheet()) paintSheet(); else paintBoard();
 
     for (i = 0; i < SIZE * SIZE; i++) {
       if (board.cells[i] !== EMPTY) drawStone(i, board.cells[i]);
     }
 
+    drawValueMap();
     drawCandidates();
     drawForbidden();
 
-    if (!state.over && !state.thinking && state.hover >= 0 &&
+    if (!state.over && !state.thinking && !isReplaying() && state.hover >= 0 &&
         board.cells[state.hover] === EMPTY && isHumanTurn()) {
-      drawStone(state.hover, state.turn, 0.32);
+      if (isSheet()) fillCell(state.hover, COLOR.sheetHover);
+      drawStone(state.hover, state.turn, isSheet() ? 0.5 : 0.32);
     }
 
-    if (state.hint >= 0 && board.cells[state.hint] === EMPTY) {
-      ctx.save();
-      ctx.strokeStyle = COLOR.hint;
-      ctx.lineWidth = 1.5;
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.arc(px(colOf(state.hint)), px(rowOf(state.hint)), m.stone, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
+    if (state.hint >= 0 && board.cells[state.hint] === EMPTY) markHint(state.hint);
 
     var last = board.history[board.history.length - 1];
-    if (last != null && !state.winLine) {
-      ctx.strokeStyle = board.cells[last] === BLACK ? COLOR.white : COLOR.black;
+    if (last != null && !state.winLine) markLast(last);
+
+    if (state.winLine && state.winLine.length) markWin(state.winLine);
+
+    // Last, so the winning line does not strike through the numbers. The sheet
+    // writes the move number into the cell itself, so it needs no second pass.
+    if (isReplaying() && !isSheet()) drawMoveNumbers();
+  }
+
+  function markHint(cell) {
+    var m = state.metrics;
+    if (isSheet()) { outlineCell(cell, COLOR.sheetActive, 1.5, [3, 3]); return; }
+    ctx.save();
+    ctx.strokeStyle = COLOR.hint;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.beginPath();
+    ctx.arc(px(colOf(cell)), px(rowOf(cell)), m.stone, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  function markLast(cell) {
+    var m = state.metrics;
+    if (isSheet()) {
+      // The active cell: a solid outline with the little fill handle at its
+      // bottom right, which is the detail that sells a spreadsheet.
+      var w = Math.max(2, m.step * 0.07);
+      outlineCell(cell, COLOR.sheetActive, w);
+      var b = cellBox(cell), size = Math.max(3, m.step * 0.14);
+      ctx.save();
+      ctx.fillStyle = COLOR.sheetActive;
+      ctx.fillRect(b.x + b.w - size / 2, b.y + b.h - size / 2, size, size);
+      ctx.restore();
+      return;
+    }
+    ctx.save();
+    if (isReplaying()) {
+      // The number already sits in the middle of the stone, so the marker
+      // for the move being shown goes round the outside of it.
+      ctx.strokeStyle = COLOR.hint;
+      ctx.lineWidth = Math.max(1.5, m.step * 0.05);
+      ctx.beginPath();
+      ctx.arc(px(colOf(cell)), px(rowOf(cell)), m.stone * 1.12, 0, Math.PI * 2);
+    } else {
+      ctx.strokeStyle = board.cells[cell] === BLACK ? COLOR.white : COLOR.black;
       ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(px(colOf(last)), px(rowOf(last)), m.stone * 0.32, 0, Math.PI * 2);
-      ctx.stroke();
+      ctx.arc(px(colOf(cell)), px(rowOf(cell)), m.stone * 0.32, 0, Math.PI * 2);
     }
+    ctx.stroke();
+    ctx.restore();
+  }
 
-    if (state.winLine && state.winLine.length) {
-      var a = state.winLine[0], b = state.winLine[state.winLine.length - 1];
-      ctx.save();
-      ctx.strokeStyle = COLOR.win;
-      ctx.lineWidth = Math.max(2, m.step * 0.09);
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      ctx.moveTo(px(colOf(a)), px(rowOf(a)));
-      ctx.lineTo(px(colOf(b)), px(rowOf(b)));
-      ctx.stroke();
-      ctx.restore();
+  function markWin(line) {
+    var m = state.metrics, i;
+    if (isSheet()) {
+      // A selected range, which is how a sheet points at five cells at once.
+      for (i = 0; i < line.length; i++) fillCell(line[i], COLOR.sheetSelect, 0.45);
+      for (i = 0; i < line.length; i++) drawStone(line[i], board.cells[line[i]]);
+      for (i = 0; i < line.length; i++) outlineCell(line[i], COLOR.sheetActive, 1.5);
+      return;
     }
+    var a = line[0], b = line[line.length - 1];
+    ctx.save();
+    ctx.strokeStyle = COLOR.win;
+    ctx.lineWidth = Math.max(2, m.step * 0.09);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(px(colOf(a)), px(rowOf(a)));
+    ctx.lineTo(px(colOf(b)), px(rowOf(b)));
+    ctx.stroke();
+    ctx.restore();
   }
 
   /* ---- engine backends -------------------------------------------------- */
@@ -343,9 +855,11 @@
      every stone to the user, coach just keeps the analysis running. */
   function engineColor() {
     var mode = els.mode.value;
-    if (mode === 'lesson') return 0;
     if (mode === 'ai-white') return WHITE;
     if (mode === 'ai-black') return BLACK;
+    // Sparring: whoever is to move is the engine, so every check that compares
+    // the two reads correctly without knowing about the mode at all.
+    if (mode === 'demo') return state.turn;
     return 0;
   }
 
@@ -359,7 +873,7 @@
     });
   }
 
-  function askRapfi(color, timeoutMs, strength) {
+  function askRapfi(color, timeoutMs, window) {
     return fetch('api/move', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -369,7 +883,7 @@
         stones: stonesForEngine(),
         engineColor: color,
         timeoutMs: timeoutMs,
-        strength: strength
+        window: window
       })
     }).then(function (r) { return r.json(); }).then(function (data) {
       if (data.error) throw new Error(data.error);
@@ -378,25 +892,68 @@
     });
   }
 
-  function askLocal(color) {
-    // Map Rapfi's 0-100 strength onto the fallback engine's search depth.
-    var s = Number(els.level.value);
-    var depth = s >= 100 ? 6 : s >= 80 ? 4 : s >= 50 ? 4 : s >= 25 ? 2 : 1;
+  function askLocal(color, level) {
+    var d = level || difficulty();
     return new Promise(function (resolve) {
       setTimeout(function () {
-        resolve({ cell: board.bestMove(color, depth), info: null });
+        resolve({ cell: board.bestMove(color, d.depth), info: null });
       }, 30);
     });
   }
 
+  /* A level with a perception table is played by the bundled engine, on its own
+     board so the live one keeps reading shapes truly for the coaching. */
+  var novice = new G.Board();
+
+  function noviceMove(color, level) {
+    novice.reset();
+    novice.perception = level.sees;
+    for (var i = 0; i < board.history.length; i++) {
+      novice.place(board.history[i], board.cells[board.history[i]]);
+    }
+    return novice.bestMove(color, level.depth);
+  }
+
+  /* Rapfi still reads the position even when it is not the one choosing, so the
+     grading, the review line and the evaluation bar stay honest. The handicap is
+     on who picks the move, never on what the coaching is allowed to know. */
+  function readPosition(sideToMove) {
+    return fetch('api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        size: SIZE,
+        rule: els.rule.value,
+        stones: stonesForEngine(),
+        sideToMove: sideToMove,
+        timeoutMs: ANALYSIS_MS,
+        count: 1
+      })
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      if (data.error) throw new Error(data.error);
+      showAnalysis(data.info);
+      return data.info;
+    });
+  }
+
+  function askNovice(color, level) {
+    var cell = noviceMove(color, level);
+    if (backend.kind !== 'rapfi') return Promise.resolve({ cell: cell, info: null });
+    return readPosition(color).then(function (info) {
+      return { cell: cell, info: info };
+    }, function () {
+      return { cell: cell, info: null };
+    });
+  }
+
   function askForMove(color) {
-    var timeoutMs = Number(els.thinkTime.value);
-    var strength = Number(els.level.value);
-    if (backend.kind !== 'rapfi') return askLocal(color);
-    return askRapfi(color, timeoutMs, strength).catch(function (err) {
+    var d = levelFor(color);
+    if (d.sees) return askNovice(color, d);
+    if (backend.kind !== 'rapfi') return askLocal(color, d);
+    return askRapfi(color, d.timeoutMs, d.window).catch(function (err) {
       // Rapfi went away mid-game: keep playing rather than stranding the user.
       setBackend({ kind: 'local', label: 'Built-in engine (Rapfi unreachable)' });
-      return askLocal(color);
+      return askLocal(color, d);
     });
   }
 
@@ -462,7 +1019,7 @@
   }
 
   function requestForbidden() {
-    if (!isRenju() || backend.kind !== 'rapfi') {
+    if (isReplaying() || !isRenju() || backend.kind !== 'rapfi') {
       clearForbidden();
       return;
     }
@@ -492,13 +1049,30 @@
 
   function drawForbidden() {
     if (!state.forbidden.length) return;
-    var m = state.metrics, arm = m.stone * 0.5;
+    var m = state.metrics, arm = m.stone * 0.5, i, x, y;
+
+    if (isSheet()) {
+      // The little corner flag a sheet puts on a cell that failed validation.
+      ctx.save();
+      ctx.fillStyle = COLOR.win;
+      for (i = 0; i < state.forbidden.length; i++) {
+        var b = cellBox(state.forbidden[i]), size = Math.max(4, m.step * 0.22);
+        ctx.beginPath();
+        ctx.moveTo(b.x + b.w - size, b.y);
+        ctx.lineTo(b.x + b.w, b.y);
+        ctx.lineTo(b.x + b.w, b.y + size);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.restore();
+      return;
+    }
     ctx.save();
     ctx.strokeStyle = COLOR.win;
     ctx.lineWidth = Math.max(1.5, m.step * 0.055);
     ctx.lineCap = 'round';
-    for (var i = 0; i < state.forbidden.length; i++) {
-      var x = px(colOf(state.forbidden[i])), y = px(rowOf(state.forbidden[i]));
+    for (i = 0; i < state.forbidden.length; i++) {
+      x = px(colOf(state.forbidden[i])); y = px(rowOf(state.forbidden[i]));
       ctx.beginPath();
       ctx.moveTo(x - arm, y - arm); ctx.lineTo(x + arm, y + arm);
       ctx.moveTo(x + arm, y - arm); ctx.lineTo(x - arm, y + arm);
@@ -620,222 +1194,280 @@
     return 'middle game';
   }
 
-  /* ---- lessons -----------------------------------------------------------
-     Each lesson is a position plus one thing to find. A lesson about a shape
-     accepts any move that makes that shape; a lesson about answering a threat
-     accepts only the squares that actually answer it.
+  /* ---- finished games -----------------------------------------------------
+     Every game that reaches a result is written to local storage, newest
+     first, and can be replayed move by move. Colours are not stored because
+     Black always opens: move i belongs to Black when i is even, which is also
+     what the numbers drawn on the stones mean, 1 black, 2 white, 3 black.
 
-     Coordinates are engine coordinates, x from the left and y from the bottom,
-     so they read the same way as the labels on the board. Filler stones sit far
-     apart where they cannot form a line or change the lesson, and they also set
-     whose turn it is: Black moves when both sides have the same count. */
+     A replay takes the board over rather than drawing beside it, so the live
+     game is put aside when one opens and handed back when it closes. */
 
-  var FILLER = [[0, 0], [14, 0], [0, 14], [14, 14], [0, 7], [14, 7],
-                [7, 0], [7, 14], [2, 2], [12, 12], [2, 12], [12, 2]];
+  var HISTORY_KEY = 'gomoku.history';
+  var TAB_KEY = 'gomoku.lefttab';
+  var HISTORY_MAX = 50;
 
-  function fillers(count) { return FILLER.slice(0, count); }
+  var MODE_LABEL = {
+    'ai-white': 'engine as White',
+    'ai-black': 'engine as Black',
+    'human': 'two players',
+    'coach': 'tactics'
+  };
 
-  var LESSONS = [
-    {
-      title: 'Make an open three',
-      brief: 'Black to play. Add one stone to the two on the board so they become an open three.',
-      why: 'An open three has room at both ends, so next move it could become an open four that cannot be stopped. That is why it forces an answer.',
-      black: [[6, 7], [7, 7]],
-      white: fillers(2),
-      turn: BLACK,
-      want: { shape: 'open three' }
-    },
-    {
-      title: 'Answer an open three',
-      brief: 'White has an open three across the middle. Black to play: stop it before it becomes an open four.',
-      why: 'You block at one of the two ends. Anywhere else and White takes an end themselves, reaching an open four with two ways to make five.',
-      black: fillers(3),
-      white: [[5, 7], [6, 7], [7, 7]],
-      turn: BLACK,
-      want: { cells: [[4, 7], [8, 7]] }
-    },
-    {
-      title: 'Answer a four',
-      brief: 'White has four in a row, blocked at one end. Black to play: only one square saves the game.',
-      why: 'A four threatens five at once, so it must be answered on the single square that would complete it. That is what makes fours forcing: the reply is not a choice.',
-      black: [[3, 7]].concat(fillers(3)),
-      white: [[4, 7], [5, 7], [6, 7], [7, 7]],
-      turn: BLACK,
-      want: { cells: [[8, 7]] }
-    },
-    {
-      title: 'Make a four',
-      brief: 'Black to play. White has blocked one end of your three. Make a four anyway.',
-      why: 'Even blocked on one side a four forces a reply, so it buys you a free move elsewhere. Chaining these is how a forced win gets built.',
-      black: [[5, 7], [6, 7], [7, 7]],
-      white: [[4, 7]].concat(fillers(2)),
-      turn: BLACK,
-      want: { shape: 'four' }
-    },
-    {
-      title: 'Make an open four',
-      brief: 'Black to play. Nothing is blocking you this time. Turn the three into an open four.',
-      why: 'An open four has two squares that would make five. Your opponent can block only one of them, so an open four simply wins.',
-      black: [[5, 7], [6, 7], [7, 7]],
-      white: fillers(3),
-      turn: BLACK,
-      want: { shape: 'open four' }
-    },
-    {
-      title: 'The four-three fork',
-      brief: 'Black to play. One square makes a four across and a three downward at the same time. Find it.',
-      why: 'The four must be answered, and while it is being answered you turn the three into an open four. Two threats and one reply: the most common winning pattern in gomoku.',
-      black: [[4, 7], [5, 7], [6, 7], [7, 5], [7, 6]],
-      white: [[3, 7]].concat(fillers(4)),
-      turn: BLACK,
-      want: { shape: 'four-three' }
-    },
-    {
-      title: 'The double three',
-      brief: 'Black to play. Find the square that makes two open threes at once.',
-      why: 'Both threes demand an answer and only one can get it. This is exactly the move renju forbids Black from playing, which tells you how strong it is.',
-      black: [[6, 7], [8, 7], [7, 5], [7, 6]],
-      white: fillers(4),
-      turn: BLACK,
-      want: { shape: 'double three' }
-    },
-    {
-      title: 'The double four',
-      brief: 'Black to play. Both lines are blocked at one end, but one square still completes two separate fours.',
-      why: 'Each four threatens five on its own square, and only one of them can be blocked. Blocked at one end they are ordinary fours rather than open ones, and the pair still wins.',
-      black: [[3, 7], [4, 7], [6, 7], [5, 4], [5, 5], [5, 6]],
-      white: [[2, 7], [5, 3]].concat(fillers(4)),
-      turn: BLACK,
-      want: { shape: 'double four' }
-    },
-    {
-      title: 'Take the fork square first',
-      brief: 'Now you are on the other side of it. White is one move from a four-three. Black to play: take that square away.',
-      why: 'Forks are stopped before they happen, not after. Watch for the point where two of your opponent lines cross, and sit on it.',
-      black: [[3, 7]].concat(fillers(4)),
-      white: [[4, 7], [5, 7], [6, 7], [7, 5], [7, 6]],
-      turn: BLACK,
-      want: { cells: [[7, 7]] }
-    }
-  ];
+  var RULE_LABEL = { freestyle: 'freestyle', standard: 'standard', renju: 'renju' };
 
-  var LESSON_KEY = 'gomoku.lessons';
-
-  function isLessonMode() { return els.mode.value === 'lesson'; }
-
-  function lessonAccepts(lesson, cell, shape) {
-    if (lesson.want.shape) return !!shape && shape.name === lesson.want.shape;
-    return lesson.want.cells.some(function (p) { return fromEngine(p[0], p[1]) === cell; });
+  /* Games come back out of storage, so a row is built from the words in those
+     two tables rather than from whatever the record happens to hold. */
+  function gameMeta(game) {
+    var meta = game.moves.length + ' moves';
+    if (MODE_LABEL[game.mode]) meta += ' · ' + MODE_LABEL[game.mode];
+    if (RULE_LABEL[game.rule]) meta += ' · ' + RULE_LABEL[game.rule];
+    return meta;
   }
 
-  function lessonAnswerCells(lesson) {
-    if (lesson.want.cells) {
-      return lesson.want.cells.map(function (p) { return fromEngine(p[0], p[1]); });
-    }
-    // A shape lesson: every empty point that would make the wanted shape.
-    var out = [];
-    for (var c = 0; c < SIZE * SIZE; c++) {
-      if (board.cells[c] !== EMPTY) continue;
-      board.cells[c] = state.turn;
-      var shape = describeMove(c, state.turn);
-      board.cells[c] = EMPTY;
-      if (shape.name === lesson.want.shape) out.push(c);
-    }
-    return out;
+  function playerAt(index) { return index % 2 === 0 ? BLACK : WHITE; }
+
+  function isReplaying() { return !!state.replay; }
+
+  function loadGames() {
+    var list;
+    try { list = JSON.parse(recall(HISTORY_KEY) || '[]'); } catch (e) { return []; }
+    if (!Array.isArray(list)) return [];
+    return list.filter(function (g) {
+      return g && Array.isArray(g.moves) && g.moves.length;
+    });
   }
 
-  function loadLesson(index) {
-    if (index < 0 || index >= LESSONS.length) return;
-    var lesson = LESSONS[index];
-    state.lesson = index;
-    state.lessonSolved = false;
-    state.lessonNote = '';
+  /* A long game on a nearly full store can go over the quota. Rather than lose
+     the write, drop the oldest games until it fits. */
+  function saveGames() {
+    for (var n = state.games.length; n > 0; n--) {
+      try {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify(state.games.slice(0, n)));
+        state.games.length = n;      // whatever did not fit is gone for good
+        return;
+      } catch (e) { /* still too big: keep fewer */ }
+    }
+    // Nothing was written: either the list is empty, or there is no store at
+    // all, in which case the games stay in memory for as long as the page does.
+    try { localStorage.removeItem(HISTORY_KEY); } catch (e) { /* not available */ }
+  }
 
+  function sameMoves(a, b) {
+    if (!a || a.length !== b.length) return false;
+    for (var i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+    return true;
+  }
+
+  /* Called the moment a game is decided. Taking the last move back and playing
+     it again would otherwise file the same game twice, so an identical game at
+     the top of the list is left alone. */
+  function recordGame() {
+    if (state.games.length && sameMoves(state.games[0].moves, board.history)) return;
+    state.games.unshift({
+      at: Date.now(),
+      rule: els.rule.value,
+      mode: els.mode.value,
+      winner: state.winner,
+      moves: board.history.slice(),
+      grades: state.grades.slice(0, board.history.length)
+    });
+    if (state.games.length > HISTORY_MAX) state.games.length = HISTORY_MAX;
+    saveGames();
+  }
+
+  function resultText(game) {
+    return game.winner ? name(game.winner) + L('wins') : L('draw');
+  }
+
+  function whenText(at) {
+    var d = new Date(at);
+    if (!at || isNaN(d.getTime())) return '';
+    return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) + ' ' +
+           d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+  }
+
+  /* Put the first `upto` moves on the board, naming the shape each one made as
+     it lands: a shape depends on the stones already down, so the position has
+     to be built up in order rather than dealt out at once. */
+  function replayTo(moves, upto) {
     board.reset();
-    lesson.black.forEach(function (p) { board.cells[fromEngine(p[0], p[1])] = BLACK; });
-    lesson.white.forEach(function (p) { board.cells[fromEngine(p[0], p[1])] = WHITE; });
-    board.stones = lesson.black.length + lesson.white.length;
-    for (var c = 0; c < SIZE * SIZE; c++) {
-      if (board.cells[c] !== EMPTY) board.refreshLines(c);
+    state.shapes = [];
+    for (var i = 0; i < upto; i++) {
+      var player = playerAt(i);
+      board.place(moves[i], player);
+      state.shapes[i] = describeMove(moves[i], player);
+    }
+  }
+
+  function openReplay(index) {
+    var game = state.games[index];
+    if (!game || state.thinking) return;
+
+    if (!state.replay) {
+      state.replay = {
+        index: index,
+        ply: 0,
+        saved: {
+          moves: board.history.slice(),
+          turn: state.turn,
+          over: state.over,
+          winner: state.winner,
+          winLine: state.winLine,
+          grades: state.grades.slice(),
+          shapes: state.shapes.slice(),
+          prior: state.prior,
+          whiteRate: state.whiteRate
+        }
+      };
+      state.hint = -1;
+      state.error = '';
+      clearDemoTimer();
+      clearCandidates();
+      clearForbidden();
+      clearAnalysis();
+    }
+    state.replay.index = index;
+    setPly(game.moves.length);
+  }
+
+  /* Show the position after `n` moves. The stored valuations come along with
+     it, so the move log, the review line and the evaluation bar all read as
+     they did when the game was played. */
+  function setPly(n) {
+    var r = state.replay;
+    if (!r) return;
+    var game = state.games[r.index];
+    if (!game) { closeReplay(); return; }
+
+    r.ply = Math.max(0, Math.min(game.moves.length, n));
+    replayTo(game.moves, r.ply);
+    state.grades = (game.grades || []).slice(0, r.ply);
+    state.turn = playerAt(r.ply);
+    state.over = r.ply === game.moves.length;
+    state.winner = state.over ? game.winner : 0;
+    state.winLine = null;
+    if (state.over && game.winner) {
+      var last = game.moves[r.ply - 1];
+      state.winLine = board.winningLineAt(last, exactFiveUnder(game.rule, game.winner));
     }
 
-    state.turn = lesson.turn;
-    state.over = false;
-    state.winner = 0;
-    state.winLine = null;
-    state.grades = [];
-    state.shapes = [];
-    state.prior = null;
+    var g = state.grades[r.ply - 1];
+    // A grade is worth the position to whoever played that move.
+    setWinRate(g && g.value != null ? g.value : null, playerAt(r.ply - 1));
+    render();
+  }
+
+  function closeReplay() {
+    var r = state.replay;
+    if (!r) return;
+    var saved = r.saved;
+    state.replay = null;
+
+    replayTo(saved.moves, saved.moves.length);
+    state.shapes = saved.shapes;
+    state.grades = saved.grades;
+    state.turn = saved.turn;
+    state.over = saved.over;
+    state.winner = saved.winner;
+    state.winLine = saved.winLine;
+    state.prior = saved.prior;
+    state.whiteRate = saved.whiteRate;
     state.hint = -1;
     state.error = '';
-    state.whiteRate = null;
-    clearCandidates();
-    clearForbidden();
-    clearAnalysis();
+    render();
+    settle();
+  }
+
+  function setTab(tab) {
+    if (tab !== 'history') closeReplay();
+    state.tab = tab;
+    store(TAB_KEY, tab);
     render();
   }
 
-  /* The learner has just played. Keep the stone if it is right, take it back if
-     it is not, so the same position is there to try again. */
-  function judgeLesson() {
-    var lesson = LESSONS[state.lesson];
-    if (!lesson || state.lessonSolved) return;
-    var i = board.history.length - 1;
-    if (i < 0) return;
-    var cell = board.history[i];
-    var shape = state.shapes[i];
+  /* Wiping the list is a two-step button rather than a dialog: the first click
+     arms it, the second does it, and moving off the button gives up. */
+  var clearArmed = false;
 
-    if (lessonAccepts(lesson, cell, shape)) {
-      state.lessonSolved = true;
-      state.lessonNote = 'Yes. ' + G.toCoord(cell) +
-        (shape && shape.name !== 'quiet move' ? ' makes a ' + shape.name + '. ' : '. ') + lesson.why;
-      state.lessonDone[state.lesson] = true;
-      store(LESSON_KEY, Object.keys(state.lessonDone).join(','));
-      render();
-      return;
-    }
+  function armClear(on) {
+    clearArmed = !!on;
+    els.historyClear.textContent = clearArmed ? L('clearSure') : L('clearList');
+  }
 
-    state.lessonNote = 'Not that one. ' + G.toCoord(cell) +
-      (shape ? ' makes a ' + shape.name + '.' : '.') + ' Try again.';
-    board.undo();
-    state.shapes.length = board.history.length;
-    state.turn = lesson.turn;
-    state.over = false;
-    state.winner = 0;
-    state.winLine = null;
+  function clearHistory() {
+    closeReplay();
+    state.games = [];
+    saveGames();
     render();
   }
 
-  function firstUnsolvedLesson() {
-    for (var i = 0; i < LESSONS.length; i++) {
-      if (!state.lessonDone[i]) return i;
+  /* One row per move, shared by the live log and the replay log. `current` is
+     the move being shown, 1-based; anything after it is still to come. */
+  function movelogHtml(moves, grades, current) {
+    var html = '';
+    for (var i = 0; i < moves.length; i++) {
+      var g = grades ? grades[i] : null;
+      var cls = i % 2 === 0 ? 'b' : 'w';
+      if (i === current - 1) cls += ' last';
+      if (i >= current) cls += ' ahead';
+      if (g) cls += ' g-' + g.grade.toLowerCase();
+      html += '<li class="' + cls + '" data-ply="' + (i + 1) + '">' +
+              '<span class="n">' + (i + 1) + '</span>' +
+              '<span class="sd">' + name(playerAt(i)).charAt(0) + '</span>' +
+              '<span class="c">' + coordText(moves[i]) + '</span>' +
+              '<span class="ev">' + (g ? formatValue(g.value) : '') + '</span>' +
+              '<span class="q">' + (g ? gradeText(g.grade) : '') + '</span>' +
+              '</li>';
     }
-    return 0;
+    return html;
   }
 
-  function renderLessons() {
-    var on = isLessonMode();
-    els.lessons.hidden = !on;
+  function renderHistory() {
+    var on = state.tab === 'history';
+    els.history.hidden = !on;
     els.movelog.hidden = on;
-    els.leftTitle.textContent = on ? 'Lessons' : 'Moves';
+    els.tabMoves.setAttribute('aria-selected', on ? 'false' : 'true');
+    els.tabHistory.setAttribute('aria-selected', on ? 'true' : 'false');
     if (!on) return;
 
     var html = '';
-    for (var i = 0; i < LESSONS.length; i++) {
-      var cls = (i === state.lesson ? 'current' : '') + (state.lessonDone[i] ? ' done' : '');
-      html += '<li class="' + cls + '" data-lesson="' + i + '">' +
-              '<span class="n">' + (i + 1) + '</span>' +
-              '<span class="t">' + LESSONS[i].title + '</span></li>';
+    for (var i = 0; i < state.games.length; i++) {
+      var g = state.games[i];
+      var dot = g.winner === WHITE ? 'stone-dot white'
+        : (g.winner ? 'stone-dot' : 'stone-dot none');
+      html += '<li class="' + (isReplaying() && state.replay.index === i ? 'current' : '') +
+              '" data-game="' + i + '">' +
+              '<span class="' + dot + '"></span>' +
+              '<span class="g-text">' +
+                '<span class="g-top">' +
+                  '<span class="g-res">' + resultText(g) + '</span>' +
+                  '<span class="g-when">' + whenText(g.at) + '</span>' +
+                '</span>' +
+                '<span class="g-meta">' + gameMeta(g) + '</span>' +
+              '</span></li>';
     }
-    els.lessonList.innerHTML = html;
+    els.gameList.innerHTML = html;
+    els.historyClear.disabled = !state.games.length;
+    if (!state.games.length && clearArmed) armClear(false);
 
-    var lesson = LESSONS[state.lesson];
-    els.lessonTitle.textContent = lesson ? (state.lesson + 1) + '. ' + lesson.title : '';
-    els.lessonBrief.textContent = lesson ? lesson.brief : 'Pick a lesson to begin.';
-    els.lessonFeedback.textContent = state.lessonNote;
-    els.lessonFeedback.className = 'lesson-feedback' + (state.lessonSolved ? ' ok' : '');
-    els.lessonRetry.disabled = state.lesson < 0;
-    els.lessonNext.disabled = state.lesson < 0 || state.lesson >= LESSONS.length - 1;
+    var r = state.replay;
+    var game = r ? state.games[r.index] : null;
+    els.replay.hidden = !game;
+    if (!game) return;
+
+    els.replayTitle.textContent = resultText(game) + ' · move ' + r.ply +
+                                  ' of ' + game.moves.length;
+    els.replayLog.innerHTML = movelogHtml(game.moves, game.grades, r.ply);
+    var row = els.replayLog.querySelector ? els.replayLog.querySelector('li.last') : null;
+    if (row) {
+      // Keep the move being shown in view without scrolling the panel itself.
+      els.replayLog.scrollTop = row.offsetTop - els.replayLog.clientHeight / 2 + row.offsetHeight;
+    }
+    els.replayStart.disabled = r.ply === 0;
+    els.replayPrev.disabled = r.ply === 0;
+    els.replayNext.disabled = r.ply === game.moves.length;
+    els.replayEnd.disabled = r.ply === game.moves.length;
   }
 
   /* ---- scored options ----------------------------------------------------
@@ -867,14 +1499,14 @@
     state.grades[index] = {
       value: value,
       loss: loss,
-      best: prior.bestCoord,
+      bestCell: prior.bestCell,
       grade: playedBest ? 'Best' : gradeFor(loss)
     };
   }
 
   function requestAnalysis() {
     // Tactics mode analyses even when the option list is switched off.
-    if (isLessonMode()) { clearCandidates(); return; }   // the lesson owns the board
+    if (isReplaying()) { clearCandidates(); return; }    // the replay owns the board
     var count = Number(els.nbest.value) || (isCoach() ? 5 : 0)
                 || (state.hintOn || state.evalBarOn ? 1 : 0);
     if (!count || backend.kind !== 'rapfi' || state.over || !isHumanTurn()) {
@@ -886,8 +1518,10 @@
     state.candPending = true;
     renderCandidates();
 
-    // Keep analysis snappy: it queues ahead of the move the user is about to make.
-    var timeoutMs = Math.min(Number(els.thinkTime.value) || 1000, 2000);
+    // Keep analysis snappy: it queues ahead of the move the user is about to
+    // make. Difficulty does not touch it - hints, scored options and the
+    // evaluation bar are always the engine's real opinion.
+    var timeoutMs = ANALYSIS_MS;
 
     fetch('api/analyze', {
       method: 'POST',
@@ -933,8 +1567,7 @@
       state.prior = {
         moveCount: board.history.length,
         value: positionValue,
-        bestCell: list.length ? list[0].cell : -1,
-        bestCoord: list.length ? G.toCoord(list[0].cell) : ''
+        bestCell: list.length ? list[0].cell : -1
       };
 
       state.candidates = list;
@@ -955,11 +1588,16 @@
     var i = board.history.length - 1;
     var g = i >= 0 ? state.grades[i] : null;
     if (!g) { els.review.textContent = ''; return; }
-    var played = G.toCoord(board.history[i]);
-    var text = 'Move ' + (i + 1) + ' ' + played + ' · ' + g.grade;
+    var played = coordText(board.history[i]);
+    var text = L('unit') + ' ' + (i + 1) + ' ' + played + ' · ' + gradeText(g.grade);
     if (g.grade !== 'Best') {
-      text += ' · gave up ' + Math.round(g.loss);
-      if (g.best && g.best !== played) text += ' · best was ' + g.best;
+      // A move that turns a playable position into a lost one shows a loss on
+      // the mate scale, six digits of it, which says nothing. Name it instead.
+      text += g.loss >= 1e5 ? ' · walked into a forced loss'
+                            : ' · gave up ' + Math.round(g.loss);
+      if (g.bestCell >= 0 && g.bestCell !== board.history[i]) {
+        text += ' · best was ' + coordText(g.bestCell);
+      }
     }
     els.review.textContent = text;
   }
@@ -970,7 +1608,7 @@
       var c = state.candidates[i];
       html += '<li class="' + (i === 0 ? 'top' : '') + '" data-cell="' + c.cell + '">' +
               '<span class="rank">' + (i + 1) + '</span>' +
-              '<span class="mv">' + G.toCoord(c.cell) + '</span>' +
+              '<span class="mv">' + coordText(c.cell) + '</span>' +
               (c.depth ? '<span class="dp">d' + c.depth + '</span>' : '') +
               '<span class="sc">' + (c.score === '' ? 'forced' : formatEval(c.score)) + '</span>' +
               '</li>';
@@ -979,15 +1617,38 @@
     els.candList.classList.toggle('pending', state.candPending);
   }
 
+  function candidatesShown() {
+    return state.candidates.length > 0 && !state.over;
+  }
+
   function drawCandidates() {
-    if (!state.candidates.length || state.over) return;
-    var m = state.metrics;
+    if (!candidatesShown()) return;
+    var m = state.metrics, i, c, x, y;
+
+    if (isSheet()) {
+      // Projections: a dashed cell and the figure it would carry.
+      ctx.save();
+      ctx.textAlign = 'right';
+      ctx.textBaseline = 'middle';
+      for (i = 0; i < state.candidates.length; i++) {
+        c = state.candidates[i];
+        outlineCell(c.cell, COLOR.sheetActive, i === 0 ? 1.5 : 1, [3, 2]);
+        if (c.score === '') continue;
+        ctx.globalAlpha = Math.max(0.4, 1 - i * 0.11);
+        ctx.fillStyle = COLOR.label;
+        ctx.font = sheetFont(0.3, i === 0 ? '600' : '');
+        ctx.fillText(formatEval(c.score), px(colOf(c.cell)) + m.step * 0.40, px(rowOf(c.cell)));
+      }
+      ctx.restore();
+      return;
+    }
+
     ctx.save();
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    for (var i = 0; i < state.candidates.length; i++) {
-      var c = state.candidates[i];
-      var x = px(colOf(c.cell)), y = px(rowOf(c.cell));
+    for (i = 0; i < state.candidates.length; i++) {
+      c = state.candidates[i];
+      x = px(colOf(c.cell)); y = px(rowOf(c.cell));
       // Best option is drawn solid black, the rest fade back by rank.
       var weight = Math.max(0.22, 1 - i * 0.11);
       ctx.globalAlpha = weight;
@@ -1012,6 +1673,87 @@
     ctx.restore();
   }
 
+  /* ---- point value map ---------------------------------------------------
+     A dot on every empty point that is worth something, sized by how much: what
+     a stone there would build for the side to move, plus what it would deny the
+     other side. Both halves come from the bundled engine's pattern tables, so
+     the map is instant, costs the engine nothing and works offline, but it is a
+     reading of the shapes on the board rather than a search. It shows where the
+     game is being decided; which move is actually best is what the engine's
+     scored options are for, and the two can honestly disagree.
+
+     Pattern values span six orders of magnitude, from a lone stone at 4 to a
+     five in a row at five million, so a dot drawn in proportion to the raw
+     number would leave everything but the hottest point invisible. Each point
+     is sized by its share of the best point on the board, pulled together by a
+     cube root: half the value is still four fifths of the width, a hundredth of
+     it a fifth. So the dots compare with each other, not across positions - the
+     biggest one is simply wherever the game is hottest right now. */
+
+  var MAP_FLOOR = 0.16;      // below this share of the top point, not worth a dot
+  var MAP_POINTS = 48;       // and no more than a boardful of the ones that are
+
+  /* Dot radius as a share of a stone's. Even the hottest point stays well under
+     half a stone: at anything close to one the dots start reading as pieces
+     already on the board. Weight carries the alpha as well as the size, so the
+     quiet end of the map fades out rather than crowding in. */
+  var MAP_DOT_MIN = 0.12;
+  var MAP_DOT_MAX = 0.45;
+
+  function refreshValueMap() {
+    state.valueMap = [];
+    if (!state.valueMapOn || state.over) return;
+
+    var list = board.influence(state.turn);
+    if (!list.length || list[0].value <= 0) return;
+
+    var top = list[0].value;
+    for (var i = 0; i < list.length && state.valueMap.length < MAP_POINTS; i++) {
+      var weight = Math.cbrt(Math.max(0, list[i].value) / top);
+      if (weight < MAP_FLOOR) break;      // sorted, so nothing further down qualifies
+      state.valueMap.push({ cell: list[i].cell, weight: weight });
+    }
+  }
+
+  /* One mark to a point. Where the engine has scored a point itself, its ring
+     and the evaluation written inside say more than a dot would, and read
+     better without one behind them, so the map leaves those points to it and
+     fills in the rest of the board around them. */
+  function drawValueMap() {
+    if (!state.valueMap.length) return;
+    var m = state.metrics, i;
+
+    var ranked = [];
+    if (candidatesShown()) {
+      for (i = 0; i < state.candidates.length; i++) ranked.push(state.candidates[i].cell);
+    }
+
+    if (isSheet()) {
+      // Conditional formatting: the same reading, shown the way a sheet shows a
+      // heat scale, as a wash across the cells rather than as dots on points.
+      for (i = 0; i < state.valueMap.length; i++) {
+        if (ranked.indexOf(state.valueMap[i].cell) >= 0) continue;
+        fillCell(state.valueMap[i].cell, COLOR.sheetHeat,
+                 0.06 + 0.42 * state.valueMap[i].weight);
+      }
+      return;
+    }
+
+    ctx.save();
+    ctx.fillStyle = COLOR.hint;
+    for (i = 0; i < state.valueMap.length; i++) {
+      var d = state.valueMap[i];
+      if (ranked.indexOf(d.cell) >= 0) continue;
+      ctx.globalAlpha = 0.15 + 0.45 * d.weight;
+      ctx.beginPath();
+      ctx.arc(px(colOf(d.cell)), px(rowOf(d.cell)),
+              m.stone * (MAP_DOT_MIN + (MAP_DOT_MAX - MAP_DOT_MIN) * d.weight),
+              0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   /* ---- analysis readout -------------------------------------------------- */
 
   function clearAnalysis() {
@@ -1028,7 +1770,7 @@
     if (info.eval) els.anEval.textContent = info.eval;
     if (info.nodes) els.anNodes.textContent = info.nodes;
     if (info.speed) els.anSpeed.textContent = info.speed;
-    if (info.pv && info.pv.length) els.anPv.textContent = info.pv.join(' ');
+    if (info.pv && info.pv.length) els.anPv.textContent = pvText(info.pv);
   }
 
   /* Rapfi prints search progress as
@@ -1064,14 +1806,16 @@
 
   /* ---- game flow -------------------------------------------------------- */
 
-  function name(player) { return player === BLACK ? 'Black' : 'White'; }
+  function name(player) { return player === BLACK ? L('black') : L('white'); }
 
   function play(cell) {
     if (state.over || cell < 0 || board.cells[cell] !== EMPTY) return false;
     var player = state.turn;
 
     if (player === BLACK && state.forbidden.indexOf(cell) >= 0) {
-      state.error = G.toCoord(cell) + ' is forbidden for Black: ' + forbiddenReason(cell);
+      state.error = coordText(cell) + (isSheet()
+        ? ' fails validation: ' + forbiddenReason(cell)
+        : ' is forbidden for Black: ' + forbiddenReason(cell));
       render();
       return false;
     }
@@ -1093,6 +1837,7 @@
     } else {
       state.turn = 3 - player;
     }
+    if (state.over) recordGame();
     render();
     return true;
   }
@@ -1100,11 +1845,15 @@
   /* Called whenever the position changes: either the engine owes a move, or
      the side to move is human and their options can be scored. */
   function settle() {
-    if (isLessonMode()) { judgeLesson(); render(); return; }
+    if (isReplaying()) return;
     requestForbidden();
     var color = engineColor();
-    if (!state.over && color && state.turn === color && !state.thinking) maybeEngineMove();
-    else { requestAnalysis(); refreshHint(); }
+    if (!state.over && color && state.turn === color && !state.thinking) {
+      // Sparring runs on a clock so the game can be followed, and stops dead
+      // while it is paused.
+      if (isDemo()) { if (!state.demoPaused) scheduleDemoMove(); }
+      else maybeEngineMove();
+    } else { requestAnalysis(); refreshHint(); }
   }
 
   function maybeEngineMove() {
@@ -1125,9 +1874,19 @@
         state.prior = {
           moveCount: board.history.length,
           value: value,
-          bestCell: -1,
-          bestCoord: ''
+          bestCell: -1
         };
+      }
+      /* Hold the board on a mistake before its answer is played, so there is
+         a moment to look at the position and work out the punishment. The move
+         just searched for is dropped and searched again on the way out, which
+         costs one search and keeps the grading in step. */
+      if (worthStopping()) {
+        state.demoPaused = true;
+        state.stoppedAt = board.history.length;
+        clearDemoTimer();
+        render();
+        return;
       }
       if (res.cell >= 0) play(res.cell);
       else render();
@@ -1140,7 +1899,11 @@
   }
 
   function newGame() {
-    if (isLessonMode()) { loadLesson(state.lesson); return; }
+    clearDemoTimer();
+    state.demoPaused = false;
+    state.stoppedAt = -1;
+    // A replay is holding the board: drop it, the new game replaces it anyway.
+    if (isReplaying()) { state.replay = null; state.tab = 'moves'; store(TAB_KEY, 'moves'); }
     board.reset();
     state.turn = BLACK;
     state.over = false;
@@ -1162,8 +1925,11 @@
     settle();
   }
 
-  /* Shared tail of undo and undo-all. */
+  /* Shared tail of undo and undo-all. Sparring holds after a takeback rather
+     than charging straight back into the position just left. */
   function afterTakeback() {
+    state.stoppedAt = -1;
+    if (isDemo()) { clearDemoTimer(); state.demoPaused = true; }
     state.over = false;
     state.winner = 0;
     state.winLine = null;
@@ -1182,17 +1948,18 @@
   }
 
   function undo() {
-    if (state.thinking || !board.history.length) return;
+    if (state.thinking || isReplaying() || !board.history.length) return;
     var color = engineColor();
-    var steps = color ? 2 : 1;
+    // Sparring has no side of its own to get back to, so it steps one move.
+    var steps = isDemo() ? 1 : (color ? 2 : 1);
     // If the human moved last, one step is enough to get back to their turn.
-    if (color && board.cells[board.history[board.history.length - 1]] !== color) steps = 1;
+    if (!isDemo() && color && board.cells[board.history[board.history.length - 1]] !== color) steps = 1;
     for (var i = 0; i < steps && board.history.length; i++) board.undo();
     afterTakeback();
   }
 
   function undoAll() {
-    if (state.thinking || !board.history.length) return;
+    if (state.thinking || isReplaying() || !board.history.length) return;
     while (board.history.length) board.undo();
     afterTakeback();
   }
@@ -1232,7 +1999,7 @@
     hold.raf = 0;
     els.undoAll.classList.remove('holding');
     els.undoAll.style.setProperty('--hold', '0%');
-    els.undoAll.textContent = 'Undo all';
+    els.undoAll.textContent = L('clear');
   }
 
   function toggleHint() {
@@ -1243,22 +2010,24 @@
     render();
   }
 
+  function toggleValueMap() {
+    state.valueMapOn = !state.valueMapOn;
+    store(VALUEMAP_KEY, state.valueMapOn ? 'on' : 'off');
+    render();
+  }
+
   /* With Rapfi the hint is the top scored option, so it rides along with the
      analysis already being requested. Offline it needs its own search. */
   function refreshHint() {
-    if (!state.hintOn || state.over || !isHumanTurn()) {
+    if (!state.hintOn || state.over || isReplaying() || !isHumanTurn()) {
       state.hint = -1;
-      return;
-    }
-    if (isLessonMode()) {
-      var lesson = LESSONS[state.lesson];
-      var answers = lesson ? lessonAnswerCells(lesson) : [];
-      state.hint = answers.length ? answers[0] : -1;
       return;
     }
     if (backend.kind === 'rapfi') return;   // comes back with the analysis
     var seq = ++state.candSeq;
-    askLocal(state.turn).then(function (res) {
+    // Advice is always full strength: the difficulty setting handicaps the
+    // engine as an opponent, not as a coach.
+    askLocal(state.turn, DIFFICULTY.full).then(function (res) {
       if (seq !== state.candSeq || !state.hintOn) return;
       state.hint = res.cell;
       render();
@@ -1267,69 +2036,106 @@
 
   /* ---- panel ------------------------------------------------------------ */
 
+  /* The rule the user has asked for, which is not always the one in force:
+     renju needs Rapfi, and the page opens on the fallback engine for the moment
+     it takes `api/status` to answer. Without remembering the choice, a default
+     of renju would be knocked down to freestyle during that moment and never
+     come back. */
+  var wantedRule = els.rule.value;
+
+  function paintBadge() {
+    els.engineBadge.textContent = isSheet() ? WORDS.sheet.badge : backend.label;
+  }
+
   function setBackend(next) {
     backend = next;
-    els.engineBadge.textContent = next.label;
+    paintBadge();
     els.analysis.hidden = next.kind !== 'rapfi';
 
     // Renju needs the engine: its forbidden points come from YXSHOWFORBID, and
-    // the fallback engine cannot work them out.
+    // the fallback engine cannot work them out. It steps aside while there is no
+    // engine and comes back as soon as there is one.
     if (els.renjuOption) {
-      els.renjuOption.disabled = next.kind !== 'rapfi';
-      if (els.renjuOption.disabled && els.rule.value === 'renju') {
+      var canRenju = next.kind === 'rapfi';
+      els.renjuOption.disabled = !canRenju;
+      if (!canRenju && els.rule.value === 'renju') {
         els.rule.value = 'freestyle';
         clearForbidden();
+      } else if (canRenju && wantedRule === 'renju' && els.rule.value !== 'renju') {
+        els.rule.value = 'renju';
       }
     }
   }
 
   function renderPanel() {
     var text, dotClass;
-    if (state.over) {
-      text = state.winner ? name(state.winner) + ' wins' : 'Draw';
+    var replayed = isReplaying() ? state.games[state.replay.index] : null;
+    if (replayed) {
+      text = L('replay') + resultText(replayed);
+      dotClass = replayed.winner === WHITE ? 'stone-dot white'
+        : (replayed.winner ? 'stone-dot' : 'stone-dot none');
+    } else if (state.over) {
+      text = state.winner ? name(state.winner) + L('wins') : L('draw');
       dotClass = state.winner === WHITE ? 'stone-dot white'
         : (state.winner ? 'stone-dot' : 'stone-dot none');
     } else {
       text = state.thinking
-        ? (state.analysing ? 'Analysing' : 'Engine is thinking')
-        : name(state.turn) + ' to move';
+        ? (state.analysing ? L('analysing') : L('thinking'))
+        : name(state.turn) + L('toMove');
+      if (isDemo() && !state.thinking && state.demoPaused) {
+        text = name(state.turn) + ' to play · held';
+      }
       dotClass = state.turn === WHITE ? 'stone-dot white' : 'stone-dot';
     }
     els.statusText.textContent = text;
     els.turnDot.className = dotClass;
 
-    var meta = 'Move ' + board.history.length;
-    if (!state.over && engineColor()) meta += ' · you are ' + name(3 - engineColor());
+    var meta = L('unit') + ' ' + board.history.length;
+    if (replayed) meta += ' of ' + replayed.moves.length;
+    else if (isDemo()) meta += state.over ? '' : (state.demoPaused ? ' · holding' : ' · running');
+    else if (!state.over && engineColor()) meta += ' · you are ' + name(3 - engineColor());
     els.statusMeta.textContent = state.error || meta;
 
-    els.undo.disabled = state.thinking || board.history.length === 0 || isLessonMode();
+    els.undo.disabled = state.thinking || isReplaying() || board.history.length === 0;
     els.undoAll.disabled = els.undo.disabled;
     if (els.undoAll.disabled) cancelHold();   // nothing left to wipe, drop the countdown
-    els.hint.disabled = false;
-    els.hint.textContent = state.hintOn ? 'Hint on' : 'Hint off';
+    if (!hold.active) els.undoAll.textContent = L('clear');
+    els.hint.disabled = isReplaying();
+    paintBadge();
+    els.hint.textContent = state.hintOn ? L('hintOn') : L('hintOff');
     els.hint.setAttribute('aria-pressed', state.hintOn ? 'true' : 'false');
-    els.evalBarToggle.textContent = state.evalBarOn ? 'Evaluation bar on' : 'Evaluation bar off';
+    els.demoControls.hidden = !isDemo();
+    if (isDemo()) {
+      els.demoNote.textContent = demoNoteText();
+      els.demoPlay.textContent = state.demoPaused ? 'Play' : 'Pause';
+      els.demoPlay.disabled = state.over;
+      els.demoStep.disabled = state.over || state.thinking || !state.demoPaused;
+      els.demoStopOnError.textContent = state.stopOnError ? 'Stop on mistakes' : 'Run without stopping';
+      els.demoStopOnError.setAttribute('aria-pressed', state.stopOnError ? 'true' : 'false');
+    }
+    // A fixed matchup names both levels itself, so the Difficulty dial has
+    // nothing to say and should not look as though it does.
+    var dialIdle = isDemo() && !!matchup();
+    els.difficulty.disabled = dialIdle;
+    els.difficultyNote.textContent = dialIdle
+      ? 'Not used while the matchup above sets both sides.'
+      : (backend.kind === 'rapfi'
+        ? DIFFICULTY_NOTE[els.difficulty.value]
+        : 'Without Rapfi the built-in engine approximates this by search depth.');
+    els.valueMap.textContent = state.valueMapOn ? L('mapOn') : L('mapOff');
+    els.valueMap.setAttribute('aria-pressed', state.valueMapOn ? 'true' : 'false');
+    els.evalBarToggle.textContent = state.evalBarOn ? L('barOn') : L('barOff');
     els.evalBarToggle.setAttribute('aria-pressed', state.evalBarOn ? 'true' : 'false');
 
-    var html = '';
-    for (var i = 0; i < board.history.length; i++) {
-      var g = state.grades[i];
-      var cls = (i % 2 === 0 ? 'b' : 'w') + (i === board.history.length - 1 ? ' last' : '');
-      if (g) cls += ' g-' + g.grade.toLowerCase();
-      html += '<li class="' + cls + '">' +
-              '<span class="n">' + (i + 1) + '</span>' +
-              '<span class="sd">' + (i % 2 === 0 ? 'B' : 'W') + '</span>' +
-              '<span class="c">' + G.toCoord(board.history[i]) + '</span>' +
-              '<span class="ev">' + (g ? formatValue(g.value) : '') + '</span>' +
-              '<span class="q">' + (g ? g.grade : '') + '</span>' +
-              '</li>';
-    }
-    els.movelog.innerHTML = html;
-    if (board.history.length) els.movelog.scrollTop = els.movelog.scrollHeight;
+    // A replay has the board, so the live log comes from what it put aside.
+    var moves = isReplaying() ? state.replay.saved.moves : board.history;
+    var grades = isReplaying() ? state.replay.saved.grades : state.grades;
+    els.movelog.innerHTML = movelogHtml(moves, grades, moves.length);
+    if (moves.length) els.movelog.scrollTop = els.movelog.scrollHeight;
 
     renderReview();
 
-    canvas.classList.toggle('locked', state.over || !isHumanTurn());
+    canvas.classList.toggle('locked', state.over || isReplaying() || !isHumanTurn());
   }
 
   function titleCase(text) {
@@ -1344,20 +2150,24 @@
       return;
     }
     var shape = state.shapes[index];
-    moveEl.textContent = (index % 2 === 0 ? "B " : "W ") + G.toCoord(board.history[index]);
-    shapeEl.textContent = shape ? shape.name : "";
+    var said = shapeText(shape);
+    moveEl.textContent = name(playerAt(index)).charAt(0) + " " + coordText(board.history[index]);
+    shapeEl.textContent = said ? said.name : "";
   }
 
   /* The move just played sits on the right, the one before it on the left. */
   function renderCoach() {
     var i = board.history.length - 1;
-    els.coachPhase.textContent = titleCase(phaseName());
+    var phase = phaseName();
+    els.coachPhase.textContent = titleCase(isSheet() ? (SHEET_PHASE[phase] || phase) : phase);
 
     if (i < 0) {
       els.coachPrev.hidden = true;
-      els.curMove.textContent = "Black opens";
+      els.curMove.textContent = isSheet() ? "Actual opens" : "Black opens";
       els.curShape.textContent = "";
-      els.coachNote.textContent = "the first stone usually goes near the centre";
+      els.coachNote.textContent = isSheet()
+        ? "the first entry usually goes near the middle"
+        : "the first stone usually goes near the centre";
       return;
     }
 
@@ -1367,18 +2177,19 @@
 
     if (state.over) {
       els.coachNote.textContent = state.winner
-        ? name(state.winner) + " made five in a row"
-        : "the board is full";
+        ? name(state.winner) + (isSheet() ? " closed the run of five" : " made five in a row")
+        : (isSheet() ? "the sheet is full" : "the board is full");
       return;
     }
-    var shape = state.shapes[i];
-    els.coachNote.textContent = shape ? shape.note : "";
+    var said = shapeText(state.shapes[i]);
+    els.coachNote.textContent = said ? said.note : "";
   }
 
   function render() {
+    refreshValueMap();
     draw();
     renderPanel();
-    renderLessons();
+    renderHistory();
     renderCandidates();
     renderCoach();
     renderEvalBar();
@@ -1396,7 +2207,7 @@
   });
 
   canvas.addEventListener('click', function (e) {
-    if (!isHumanTurn() || state.over) return;
+    if (!isHumanTurn() || state.over || isReplaying()) return;
     if (play(cellFromPoint(e.clientX, e.clientY))) settle();
   });
 
@@ -1410,6 +2221,7 @@
   els.newGame.addEventListener('click', newGame);
   els.undo.addEventListener('click', undo);
   els.hint.addEventListener('click', toggleHint);
+  els.valueMap.addEventListener('click', toggleValueMap);
 
   els.undoAll.addEventListener('mousedown', startHold);
   els.undoAll.addEventListener('mouseup', cancelHold);
@@ -1422,24 +2234,55 @@
   els.undoAll.addEventListener('touchend', cancelHold);
   els.undoAll.addEventListener('touchcancel', cancelHold);
   els.undoAll.addEventListener('click', function (e) { e.preventDefault(); });
-  els.mode.addEventListener('change', function () {
-    if (isLessonMode()) {
-      state.hintOn = false;
-      loadLesson(state.lesson >= 0 ? state.lesson : firstUnsolvedLesson());
-    } else {
-      state.lesson = -1;
-      newGame();
-    }
+  els.mode.addEventListener('change', newGame);
+
+  els.demoPlay.addEventListener('click', function () { setDemoPaused(!state.demoPaused); });
+  els.demoStep.addEventListener('click', demoStep);
+  els.demoStopOnError.addEventListener('click', function () {
+    state.stopOnError = !state.stopOnError;
+    store(STOPERR_KEY, state.stopOnError ? 'on' : 'off');
+    render();
+  });
+  els.demoMatch.addEventListener('change', newGame);
+  els.demoPace.addEventListener('change', function () {
+    store(PACE_KEY, els.demoPace.value);
+    render();
   });
 
-  els.lessonList.addEventListener('click', function (e) {
-    var li = e.target.closest ? e.target.closest('li[data-lesson]') : null;
-    if (li) loadLesson(Number(li.getAttribute('data-lesson')));
+  els.tabMoves.addEventListener('click', function () { setTab('moves'); });
+  els.tabHistory.addEventListener('click', function () { setTab('history'); });
+
+  els.gameList.addEventListener('click', function (e) {
+    var li = e.target.closest ? e.target.closest('li[data-game]') : null;
+    if (li) openReplay(Number(li.getAttribute('data-game')));
   });
 
-  els.lessonRetry.addEventListener('click', function () { loadLesson(state.lesson); });
-  els.lessonNext.addEventListener('click', function () { loadLesson(state.lesson + 1); });
-  els.rule.addEventListener('change', newGame);
+  /* Any move in the replay log is a place to jump to. */
+  els.replayLog.addEventListener('click', function (e) {
+    var li = e.target.closest ? e.target.closest('li[data-ply]') : null;
+    if (li) setPly(Number(li.getAttribute('data-ply')));
+  });
+
+  els.replayStart.addEventListener('click', function () { setPly(0); });
+  els.replayPrev.addEventListener('click', function () { setPly(state.replay ? state.replay.ply - 1 : 0); });
+  els.replayNext.addEventListener('click', function () { setPly(state.replay ? state.replay.ply + 1 : 0); });
+  els.replayEnd.addEventListener('click', function () {
+    if (state.replay) setPly(state.games[state.replay.index].moves.length);
+  });
+  els.replayClose.addEventListener('click', closeReplay);
+
+  els.historyClear.addEventListener('click', function () {
+    if (!clearArmed) { armClear(true); return; }
+    armClear(false);
+    clearHistory();
+  });
+  els.historyClear.addEventListener('mouseleave', function () { armClear(false); });
+  els.historyClear.addEventListener('blur', function () { armClear(false); });
+
+  els.rule.addEventListener('change', function () {
+    wantedRule = els.rule.value;
+    newGame();
+  });
   els.nbest.addEventListener('change', requestAnalysis);
 
   els.evalBarToggle.addEventListener('click', function () {
@@ -1453,12 +2296,26 @@
   els.panelTab.addEventListener('click', function () { setPanelOpen(true); });
   els.leftToggle.addEventListener('click', function () { setLeftOpen(false); });
   els.leftTab.addEventListener('click', function () { setLeftOpen(true); });
-  els.level.addEventListener('change', function () { state.hint = -1; render(); });
-  els.thinkTime.addEventListener('change', function () { state.hint = -1; render(); });
+  els.difficulty.addEventListener('change', function () {
+    store(DIFFICULTY_KEY, els.difficulty.value);
+    state.hint = -1;
+    render();
+  });
 
   document.addEventListener('keydown', function (e) {
-    if (e.target.tagName === 'SELECT' || e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
     var k = e.key.toLowerCase();
+    if (k === 'escape') {
+      e.preventDefault();
+      setSkin(isSheet() ? 'classic' : 'sheet');
+      return;
+    }
+    if (e.target.tagName === 'SELECT') return;
+    if (isReplaying() && (k === 'arrowleft' || k === 'arrowright')) {
+      e.preventDefault();
+      setPly(state.replay.ply + (k === 'arrowright' ? 1 : -1));
+      return;
+    }
     if (k === 'n') { e.preventDefault(); newGame(); }
     else if (k === 'u') {
       e.preventDefault();
@@ -1466,6 +2323,7 @@
       if (e.shiftKey) startHold();
       else undo();
     } else if (k === 'h') { e.preventDefault(); toggleHint(); }
+    else if (k === 'v') { e.preventDefault(); toggleValueMap(); }
   });
 
   document.addEventListener('keyup', function (e) {
@@ -1509,7 +2367,13 @@
     resize();
   }
 
+  var SKIN_KEY = 'gomoku.skin';
   var EVALBAR_KEY = 'gomoku.evalbar';
+  var VALUEMAP_KEY = 'gomoku.valuemap';
+  var DIFFICULTY_KEY = 'gomoku.difficulty';
+  var FOLD_KEY = 'gomoku.folds';
+  var STOPERR_KEY = 'gomoku.stoponerror';
+  var PACE_KEY = 'gomoku.pace';
   var PANEL_KEY = 'gomoku.panel';
   var LEFT_KEY = 'gomoku.leftpanel';
 
@@ -1545,7 +2409,21 @@
     applyTheme(choice);
   }
 
+  /* Each fold remembers whether it was left open. One key holds them all,
+     as a list of the ones that are open. */
+  function foldsOpen() {
+    var open = [];
+    if (els.engineFold.open) open.push('engine');
+    if (els.keysFold.open) open.push('keys');
+    return open.join(',');
+  }
+
+  [els.engineFold, els.keysFold].forEach(function (fold) {
+    fold.addEventListener('toggle', function () { store(FOLD_KEY, foldsOpen()); });
+  });
+
   els.theme.addEventListener('change', function () { setTheme(els.theme.value); });
+  els.skin.addEventListener('change', function () { setSkin(els.skin.value); });
 
   if (window.matchMedia) {
     var dark = window.matchMedia('(prefers-color-scheme: dark)');
@@ -1559,10 +2437,17 @@
   /* ---- start ------------------------------------------------------------- */
 
   initTheme();
+  applySkin(recall(SKIN_KEY) === 'sheet' ? 'sheet' : 'classic');
   state.evalBarOn = recall(EVALBAR_KEY) !== 'off';
-  (recall(LESSON_KEY) || '').split(',').forEach(function (n) {
-    if (n !== '') state.lessonDone[Number(n)] = true;
-  });
+  state.valueMapOn = recall(VALUEMAP_KEY) === 'on';
+  if (DIFFICULTY[recall(DIFFICULTY_KEY)]) els.difficulty.value = recall(DIFFICULTY_KEY);
+  state.stopOnError = recall(STOPERR_KEY) !== 'off';
+  var folds = (recall(FOLD_KEY) || '').split(',');
+  els.engineFold.open = folds.indexOf('engine') >= 0;
+  els.keysFold.open = folds.indexOf('keys') >= 0;
+  if (recall(PACE_KEY) !== null) els.demoPace.value = recall(PACE_KEY);
+  state.games = loadGames();
+  state.tab = recall(TAB_KEY) === 'history' ? 'history' : 'moves';
   state.panelOpen = recall(PANEL_KEY) !== 'closed';
   state.leftOpen = recall(LEFT_KEY) !== 'closed';
   applyPanelState();

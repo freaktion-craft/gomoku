@@ -18,6 +18,11 @@
   /* The board never grows past this, however large the window gets. */
   --board-max: 990px;
 
+  /* And it only takes this share of the room it could have, so the board sits
+     in the window rather than filling it. One number: raise it towards 1 to go
+     back to a board that takes everything going. */
+  --board-fill: 0.75;
+
   --board: #e6e4df;
   --grid: #9b978e;
   --grid-edge: #6f6b63;
@@ -28,6 +33,14 @@
   --stone-white-edge: #8d8a83;
   --marker: #3d3d38;
   --win: #c0392b;
+
+  --sheet-header: #f1f3f4;
+  --sheet-pos: #1a56b8;
+  --sheet-neg: #c5221f;
+  --sheet-active: #107c41;
+  --sheet-hover: #eef1f4;
+  --sheet-heat: #34a853;
+  --sheet-select: #cfe3d4;
 
   color-scheme: light;
 }
@@ -86,6 +99,63 @@
   color-scheme: dark;
 }
 
+/* Spreadsheet skin. It is deliberately light in every theme: a work sheet on a
+   dark background is the one thing that would draw the eye. Declared after both
+   theme blocks so it wins at equal specificity, and it redefines every colour
+   the canvas reads rather than inheriting half a palette. */
+:root[data-skin="sheet"] {
+  --bg: #f8f9fa;
+  --surface: #ffffff;
+  --border: #dadce0;
+  --text: #202124;
+  --text-dim: #5f6368;
+  --text-faint: #9aa0a6;
+  --accent: #107c41;
+  --accent-hover: #0e6b38;
+  --accent-text: #ffffff;
+  --focus: #1a73e8;
+
+  --board: #ffffff;
+  --grid: #e0e2e5;
+  --grid-edge: #c3c6ca;
+  --coord: #5f6368;
+  --stone-black: #1a56b8;
+  --stone-black-edge: #1a56b8;
+  --stone-white: #c5221f;
+  --stone-white-edge: #c5221f;
+  --marker: #80868b;
+  --win: #107c41;
+
+  --sheet-header: #f1f3f4;
+  --sheet-pos: #1a56b8;
+  --sheet-neg: #c5221f;
+  --sheet-active: #107c41;
+  --sheet-hover: #eef1f4;
+  --sheet-heat: #34a853;
+  --sheet-select: #cfe3d4;
+
+  color-scheme: light;
+}
+
+/* Things with no place in a spreadsheet. */
+:root[data-skin="sheet"] .glossary,
+:root[data-skin="sheet"] .hint-note { display: none; }
+
+/* The variance bar reads as a column of figures rather than two stones. */
+:root[data-skin="sheet"] .evalbar {
+  background: #e8eaed;
+  border-color: var(--border);
+}
+:root[data-skin="sheet"] .evalbar-fill { background: #cfe3d4; }
+:root[data-skin="sheet"] .evalbar-num.top { color: #c5221f; }
+:root[data-skin="sheet"] .evalbar-num.bottom { color: #107c41; }
+
+:root[data-skin="sheet"] .panel-head h1 {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -126,10 +196,12 @@ body {
 }
 
 .board-stack {
-  /* One size drives both the board and the bar beside it. It is clamped at both
-     ends: never below 300px, where the pane scrolls rather than squeezing the
-     board away, and never above --board-max however big the window is. */
-  --side: clamp(300px, min(calc(100% - 38px), calc(100vh - 48px)), var(--board-max));
+  /* One size drives both the board and the bar beside it. The room available is
+     whichever runs out first, the pane's width or the window's height; the
+     board takes --board-fill of that. Clamped at both ends: never below 300px,
+     where the pane scrolls rather than squeezing the board away, and never
+     above --board-max however big the window is. */
+  --side: clamp(300px, calc(min(100% - 38px, 100vh - 48px) * var(--board-fill)), var(--board-max));
   display: flex;
   align-items: center;
   justify-content: center;
@@ -138,7 +210,7 @@ body {
 }
 
 .board-stack.no-eval {
-  --side: clamp(300px, min(100%, calc(100vh - 48px)), var(--board-max));
+  --side: clamp(300px, calc(min(100%, 100vh - 48px) * var(--board-fill)), var(--board-max));
 }
 
 .board-wrap {
@@ -209,13 +281,16 @@ body {
 /* Two cards in the corner of the board section: the move before on the left,
    the move just played on the right. */
 .coach-row {
+  /* Docked into the corner where the board pane meets the panel, so the pair
+     reads as part of the panel's edge rather than floating over the board.
+     Both cards stand on the floor of the window, whatever height each one is. */
   position: absolute;
-  top: 24px;                 /* lines up with the pane’s own padding */
-  right: 24px;
+  bottom: 0;
+  right: 0;
   display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  max-width: calc(100% - 48px);
+  align-items: flex-end;
+  gap: 0;                    /* the two cards butt together as one block */
+  max-width: 100%;
   pointer-events: none;
 }
 
@@ -227,6 +302,13 @@ body {
   line-height: 1.4;
 }
 
+/* Docked, so the edges that meet something else lose their stroke: the bottom
+   runs off the window, and the right would otherwise sit a hair from the panel's
+   own border and read as a double line. Only the edges facing the board are
+   drawn. */
+.coach { border-bottom: none; }
+.coach-cur { border-right: none; }
+
 .coach[hidden] { display: none; }
 
 .coach-prev {
@@ -236,6 +318,7 @@ body {
   background: var(--bg);     /* sits back behind the current card */
   color: var(--text-dim);
   font-size: 11px;
+  border-right: none;        /* the current card's left border is the divider */
 }
 
 .coach-cur {
@@ -283,10 +366,6 @@ body {
   .coach-prev { display: none; }   /* not enough room for both */
 }
 
-@media (max-width: 760px) {
-  .coach-row { top: 12px; right: 12px; gap: 6px; }
-}
-
 /* Panel */
 
 .panel {
@@ -320,7 +399,34 @@ body {
   flex: none;
 }
 
-.lessons {
+/* The two lists the left panel can show: the game in progress, or the games
+   that finished before it. */
+
+.left-tabs {
+  display: flex;
+  gap: 12px;
+}
+
+.tab-btn {
+  font: inherit;
+  font-size: 12px;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  border-bottom: 1px solid transparent;
+  padding: 0 0 3px;
+  cursor: pointer;
+}
+
+.tab-btn:hover { color: var(--text-dim); }
+.tab-btn:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.tab-btn[aria-selected="true"] {
+  color: var(--text);
+  border-bottom-color: var(--text);
+}
+
+.history {
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -328,10 +434,10 @@ body {
   min-height: 0;
 }
 
-.lessons[hidden] { display: none; }
+.history[hidden] { display: none; }
 .panel-left .movelog[hidden] { display: none; }
 
-.lesson-list {
+.game-list {
   margin: 0;
   padding: 0;
   list-style: none;
@@ -341,61 +447,101 @@ body {
   min-height: 72px;
 }
 
-.lesson-list li {
+.game-list li {
   display: flex;
   gap: 8px;
-  align-items: baseline;
-  padding: 4px 6px;
+  align-items: center;
+  padding: 5px 6px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   color: var(--text-dim);
 }
 
-.lesson-list li:hover { background: var(--bg); }
-.lesson-list li .n { color: var(--text-faint); min-width: 14px; }
-.lesson-list li .t { flex: 1 1 auto; }
+.game-list li:hover { background: var(--bg); }
 
-.lesson-list li.done { color: var(--text); }
-
-.lesson-list li.done .t::after {
-  content: " done";
-  color: var(--text-faint);
-  font-size: 11px;
-}
-
-.lesson-list li.current {
+.game-list li.current {
   background: var(--bg);
   color: var(--text);
-  font-weight: 600;
 }
 
-.lesson-task {
+.game-list .g-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.game-list .g-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.game-list .g-res { color: var(--text); }
+.game-list li.current .g-res { font-weight: 600; }
+
+.game-list .g-meta,
+.game-list .g-when {
+  color: var(--text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.game-list:empty::after {
+  content: "No finished games yet";
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* The replay of one game: where it is up to, its moves, and the controls. */
+.replay {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  font-size: 12px;
-  line-height: 1.45;
   border-top: 1px solid var(--border);
   padding-top: 12px;
-  overflow-y: auto;
   flex: 3 1 0;
-  min-height: 96px;
+  min-height: 120px;
 }
 
-.lesson-title { font-weight: 600; }
-.lesson-brief { color: var(--text-dim); }
+.replay[hidden] { display: none; }
 
-.lesson-feedback { color: var(--text-dim); }
-.lesson-feedback:empty { display: none; }
-.lesson-feedback.ok { color: var(--text); }
+.replay-title {
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
 
-.lesson-actions {
+.replay-log {
+  position: relative;      /* rows are scrolled to by their offset in here */
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+}
+
+.replay-log li { cursor: pointer; }
+.replay-log li:hover { background: var(--bg); }
+
+.replay-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   margin-top: auto;
 }
 
-.lesson-actions .btn { padding: 6px 8px; font-size: 12px; }
+.replay-actions .btn { padding: 5px 6px; font-size: 12px; }
+
+.history-foot {
+  display: flex;
+  justify-content: flex-end;
+  flex: none;
+}
+
+/* Moves still to come in the game being replayed. */
+.movelog li.ahead { opacity: 0.4; }
+.movelog li.ahead .c { font-weight: 400; }
 
 .panel-left .movelog {
   flex: 1 1 auto;
@@ -414,10 +560,17 @@ body {
   gap: 10px;
 }
 
+/* The title gives way rather than shoving the controls off the edge: a skin can
+   put a much longer name here than "Gomoku". */
+.panel-head > div:first-child { min-width: 0; }
+
 .panel-head h1 {
   margin: 0;
   font-size: 17px;
   font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .panel-head .sub {
@@ -479,6 +632,7 @@ body {
 .app.panel-collapsed > .panel:not(.panel-left) { display: none; }
 .app.panel-collapsed .panel-tab:not(.left) { display: block; }
 .app.panel-collapsed .coach-row { right: 40px; }
+.app.panel-collapsed .coach-cur { border-right: 1px solid var(--border); }
 
 .app.left-collapsed .panel-left { display: none; }
 .app.left-collapsed .panel-tab.left { display: block; }
@@ -487,13 +641,19 @@ body {
 .app.panel-collapsed:not(.left-collapsed) { min-width: 560px; }
 .app.left-collapsed:not(.panel-collapsed) { min-width: 620px; }
 
-#theme {
+/* The header controls sit in one row and share a size, rather than each sizing
+   itself to whatever words happen to be in it. Everything that needs a full
+   width control lives in the body of the panel instead. */
+.head-actions select {
   flex: none;
-  width: auto;
+  width: 84px;
   padding: 4px 24px 4px 8px;
   font-size: 12px;
+  line-height: 1.4;
   background-position: calc(100% - 11px) 50%, calc(100% - 7px) 50%;
 }
+
+.head-actions .icon-btn { line-height: 1.4; }
 
 .status {
   padding: 12px 14px;
@@ -535,6 +695,10 @@ body {
 }
 
 .group { display: flex; flex-direction: column; gap: 7px; }
+
+/* display on the class beats the browser's own rule for the attribute, so a
+   group that asks to be hidden has to be told again here. */
+.group[hidden] { display: none; }
 
 .label {
   font-size: 12px;
@@ -611,6 +775,17 @@ select:focus-visible, .btn:focus-visible {
 }
 
 .btn.holding:hover { background-color: var(--surface); }
+
+/* A line under a control saying what the setting actually does. */
+.hint-note {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-dim);
+}
+
+.demo-row { display: flex; gap: 6px; }
+.demo-row .btn { flex: 1 1 0; }
 
 .two-up {
   flex-direction: row;
@@ -738,6 +913,40 @@ select:focus-visible, .btn:focus-visible {
   color: var(--text-faint);
 }
 
+/* Sections that fold away, so the panel is a set of controls rather than a
+   column of everything at once. What is a readout rather than a control starts
+   shut, and whichever way it is left is how it comes back. */
+.fold > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fold > summary::-webkit-details-marker { display: none; }
+
+.fold > summary::after {
+  content: '';
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid currentColor;
+  border-bottom: 1px solid currentColor;
+  transform: rotate(-45deg) translate(-1px, 1px);
+}
+
+.fold[open] > summary::after { transform: rotate(45deg) translate(-1px, -1px); }
+
+.fold-body {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding-top: 9px;
+}
+
+.foot-fold { margin-top: auto; }
+.foot-fold .foot { border-top: none; padding-top: 8px; }
+
 .glossary {
   font-size: 12px;
   border-top: 1px solid var(--border);
@@ -754,7 +963,6 @@ select:focus-visible, .btn:focus-visible {
 .glossary dd { margin: 1px 0 0; color: var(--text-dim); line-height: 1.45; }
 
 .foot {
-  margin-top: auto;
   padding-top: 14px;
   border-top: 1px solid var(--border);
   display: flex;
@@ -775,90 +983,15 @@ select:focus-visible, .btn:focus-visible {
     border-right: none;
     border-top: 1px solid var(--border);
   }
-  .lessons {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex: 1 1 auto;
-  min-height: 0;
-}
-
-.lessons[hidden] { display: none; }
-.panel-left .movelog[hidden] { display: none; }
-
-.lesson-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: 12px;
-  overflow-y: auto;
-  flex: 2 1 0;
-  min-height: 72px;
-}
-
-.lesson-list li {
-  display: flex;
-  gap: 8px;
-  align-items: baseline;
-  padding: 4px 6px;
-  border-bottom: 1px solid var(--border);
-  cursor: pointer;
-  color: var(--text-dim);
-}
-
-.lesson-list li:hover { background: var(--bg); }
-.lesson-list li .n { color: var(--text-faint); min-width: 14px; }
-.lesson-list li .t { flex: 1 1 auto; }
-
-.lesson-list li.done { color: var(--text); }
-
-.lesson-list li.done .t::after {
-  content: " done";
-  color: var(--text-faint);
-  font-size: 11px;
-}
-
-.lesson-list li.current {
-  background: var(--bg);
-  color: var(--text);
-  font-weight: 600;
-}
-
-.lesson-task {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  font-size: 12px;
-  line-height: 1.45;
-  border-top: 1px solid var(--border);
-  padding-top: 12px;
-  overflow-y: auto;
-  flex: 3 1 0;
-  min-height: 96px;
-}
-
-.lesson-title { font-weight: 600; }
-.lesson-brief { color: var(--text-dim); }
-
-.lesson-feedback { color: var(--text-dim); }
-.lesson-feedback:empty { display: none; }
-.lesson-feedback.ok { color: var(--text); }
-
-.lesson-actions {
-  display: flex;
-  gap: 6px;
-  margin-top: auto;
-}
-
-.lesson-actions .btn { padding: 6px 8px; font-size: 12px; }
-
-.panel-left .movelog { max-height: 180px; }
+  .panel-left .movelog { max-height: 180px; }
+  .game-list { max-height: 190px; }
+  .replay-log { max-height: 190px; }
   .board-pane { padding: 12px; }
   .board-stack {
-    --side: clamp(280px, min(calc(100% - 38px), calc(100vh - 24px)), var(--board-max));
+    --side: clamp(280px, calc(min(100% - 38px, 100vh - 24px) * var(--board-fill)), var(--board-max));
   }
   .board-stack.no-eval {
-    --side: clamp(280px, min(100%, calc(100vh - 24px)), var(--board-max));
+    --side: clamp(280px, calc(min(100%, 100vh - 24px) * var(--board-fill)), var(--board-max));
   }
   .panel {
     flex: 1 1 auto;

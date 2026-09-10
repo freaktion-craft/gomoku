@@ -2,10 +2,10 @@
 rem ---------------------------------------------------------------------------
 rem  Rapfi Gomoku launcher
 rem
-rem    play.bat            start the bridge and open the board in Chrome
-rem    play.bat stop       stop a running bridge
-rem    play.bat rescan     forget the cached CPU build and probe again
-rem    play.bat chrome     show which Chrome would be used, without opening it
+rem    windows_play.bat            start the bridge and open the board in a Chrome tab
+rem    windows_play.bat stop       stop a running bridge
+rem    windows_play.bat rescan     forget the cached CPU build and probe again
+rem    windows_play.bat chrome     show which Chrome would be used, without opening it
 rem ---------------------------------------------------------------------------
 setlocal EnableExtensions EnableDelayedExpansion
 cd /d "%~dp0"
@@ -86,8 +86,9 @@ exit /b 0
 :open_chrome
 call :find_chrome
 if defined CHROME (
-  rem --app gives a clean window with no tab strip or address bar.
-  start "" "!CHROME!" --app="%URL%" --window-size=1240,900
+  rem A plain URL goes to the Chrome that is already running, as a new tab in
+  rem your own profile, rather than starting a second instance of it.
+  start "" "!CHROME!" "%URL%"
 ) else (
   echo Chrome was not found - opening your default browser instead.
   start "" "%URL%"
@@ -140,8 +141,8 @@ exit /b 0
 
 :usage
 echo Usage:
-echo   play.bat            start the bridge and open the board in Chrome
-echo   play.bat stop       stop a running bridge
-echo   play.bat rescan     forget the cached CPU build and probe again
-echo   play.bat chrome     show which Chrome would be used, without opening it
+echo   windows_play.bat            start the bridge and open the board in a Chrome tab
+echo   windows_play.bat stop       stop a running bridge
+echo   windows_play.bat rescan     forget the cached CPU build and probe again
+echo   windows_play.bat chrome     show which Chrome would be used, without opening it
 exit /b 0

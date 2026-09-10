@@ -4,26 +4,35 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rapfi Gomoku</title>
+<link rel="icon" id="favicon" href="data:,">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <div class="app">
   <aside class="panel panel-left" id="panelLeft">
     <div class="panel-left-head">
-      <span class="label" id="leftTitle">Moves</span>
+      <div class="left-tabs" role="tablist">
+        <button id="tabMoves" class="tab-btn" role="tab" aria-selected="true" data-sheet="Revisions">Moves</button>
+        <button id="tabHistory" class="tab-btn" role="tab" aria-selected="false" data-sheet="Versions">History</button>
+      </div>
       <button id="leftToggle" class="icon-btn" title="Hide this panel">Hide</button>
     </div>
     <ol class="movelog" id="movelog"></ol>
-    <div class="lessons" id="lessons" hidden>
-      <ol class="lesson-list" id="lessonList"></ol>
-      <div class="lesson-task" id="lessonTask">
-        <div class="lesson-title" id="lessonTitle"></div>
-        <div class="lesson-brief" id="lessonBrief"></div>
-        <div class="lesson-feedback" id="lessonFeedback"></div>
-        <div class="lesson-actions">
-          <button id="lessonRetry" class="btn">Reset</button>
-          <button id="lessonNext" class="btn">Next</button>
+    <div class="history" id="history" hidden>
+      <ol class="game-list" id="gameList"></ol>
+      <div class="replay" id="replay" hidden>
+        <div class="replay-title" id="replayTitle"></div>
+        <ol class="movelog replay-log" id="replayLog"></ol>
+        <div class="replay-actions">
+          <button id="replayStart" class="btn" title="Back to the empty board">Start</button>
+          <button id="replayPrev" class="btn" title="One move back">Back</button>
+          <button id="replayNext" class="btn" title="One move on">Next</button>
+          <button id="replayEnd" class="btn" title="Jump to the final position">End</button>
+          <button id="replayClose" class="btn" data-sheet="Close version">Close replay</button>
         </div>
+      </div>
+      <div class="history-foot">
+        <button id="historyClear" class="icon-btn">Clear history</button>
       </div>
     </div>
   </aside>
@@ -58,7 +67,7 @@
   <aside class="panel">
     <header class="panel-head">
       <div>
-        <h1>Gomoku</h1>
+        <h1 data-sheet="Q3_forecast">Gomoku</h1>
         <p class="sub" id="engineBadge">connecting to engine&hellip;</p>
       </div>
       <div class="head-actions">
@@ -80,76 +89,106 @@
     </section>
 
     <section class="group">
-      <label class="label" for="mode">Opponent</label>
-      <select id="mode">
-        <option value="ai-white" selected>Engine plays White</option>
-        <option value="ai-black">Engine plays Black</option>
-        <option value="human">Two players</option>
-        <option value="coach">Tactics: engine only advises</option>
-        <option value="lesson">Lessons: guided practice</option>
+      <label class="label" for="skin">View</label>
+      <select id="skin">
+        <option value="classic" selected>Board</option>
+        <option value="sheet">Sheet</option>
       </select>
     </section>
 
-    <section class="group two-up">
-      <div>
-        <label class="label" for="level">Strength</label>
-        <select id="level">
-          <option value="0">Beginner</option>
-          <option value="25">Easy</option>
-          <option value="50">Club</option>
-          <option value="80">Strong</option>
-          <option value="100" selected>Full</option>
-        </select>
+    <section class="group">
+      <label class="label" for="mode" data-sheet="Data entry">Opponent</label>
+      <select id="mode">
+        <option value="ai-white" selected data-sheet="Auto-fill Budget">Engine plays White</option>
+        <option value="ai-black" data-sheet="Auto-fill Actual">Engine plays Black</option>
+        <option value="human" data-sheet="Manual entry">Two players</option>
+        <option value="coach" data-sheet="Review only">Tactics: engine only advises</option>
+        <option value="demo" data-sheet="Auto-fill both columns">Sparring: engine plays itself</option>
+      </select>
+    </section>
+
+    <section class="group" id="demoControls" hidden>
+      <label class="label" for="demoMatch" data-sheet="Column pair">Matchup</label>
+      <select id="demoMatch">
+        <option value="full-club" selected>Full vs Club</option>
+        <option value="club-club">Club vs Club</option>
+        <option value="casual-casual">Casual vs Casual</option>
+        <option value="difficulty">Difficulty setting, both sides</option>
+      </select>
+      <p class="hint-note" id="demoNote"></p>
+
+      <label class="label" for="demoPace" data-sheet="Refresh">Pace</label>
+      <select id="demoPace">
+        <option value="0">As fast as it can</option>
+        <option value="800">Brisk</option>
+        <option value="1800" selected>Steady</option>
+        <option value="3500">Slow</option>
+      </select>
+
+      <div class="demo-row">
+        <button id="demoPlay" class="btn">Pause</button>
+        <button id="demoStep" class="btn">Step</button>
       </div>
-      <div>
-        <label class="label" for="thinkTime">Think time</label>
-        <select id="thinkTime">
-          <option value="200">0.2 s</option>
-          <option value="500">0.5 s</option>
-          <option value="1000" selected>1 s</option>
-          <option value="3000">3 s</option>
-          <option value="10000">10 s</option>
-        </select>
-      </div>
+      <button id="demoStopOnError" class="btn btn-toggle" aria-pressed="true"
+              title="Hold the game the moment a side errs, so you can look at the position before the answer comes">Stop on mistakes</button>
     </section>
 
     <section class="group">
-      <label class="label" for="rule">Rule</label>
+      <label class="label" for="difficulty" data-sheet="Model detail">Difficulty</label>
+      <select id="difficulty"
+              title="The engine always reads the position in full; a lower setting only makes it settle for a move near its best rather than the best">
+        <option value="beginner" data-sheet="Rounded">Beginner</option>
+        <option value="casual" data-sheet="Draft">Casual</option>
+        <option value="club" data-sheet="Standard">Club</option>
+        <option value="strong" data-sheet="Detailed">Strong</option>
+        <option value="full" selected data-sheet="Exact">Full</option>
+      </select>
+      <p class="hint-note" id="difficultyNote"></p>
+    </section>
+
+    <section class="group">
+      <label class="label" for="rule" data-sheet="Validation">Rule</label>
       <select id="rule">
-        <option value="freestyle" selected>Freestyle: five or more</option>
-        <option value="standard">Standard: exactly five</option>
-        <option value="renju" id="renjuOption">Renju: Black restricted</option>
+        <option value="freestyle" data-sheet="None">Freestyle: five or more</option>
+        <option value="standard" data-sheet="Range check">Standard: exactly five</option>
+        <option value="renju" id="renjuOption" selected data-sheet="Strict (Actual)">Renju: Black restricted</option>
       </select>
     </section>
 
     <section class="group actions">
-      <button id="newGame" class="btn btn-primary">New game</button>
+      <button id="newGame" class="btn btn-primary" data-sheet="New sheet">New game</button>
       <button id="undo" class="btn">Undo</button>
       <button id="undoAll" class="btn" title="Hold for 1.5 seconds to clear the board">Undo all</button>
       <button id="hint" class="btn btn-toggle" aria-pressed="false">Hint off</button>
+      <button id="valueMap" class="btn btn-toggle" aria-pressed="false"
+              title="A dot on every point that is worth something, the bigger the more it is worth">Value map off</button>
     </section>
 
     <section class="group analysis" id="analysis">
-      <div class="label">Engine</div>
+      <details class="fold" id="engineFold">
+      <summary class="label" data-sheet="Recalculation">Engine</summary>
+      <div class="fold-body">
       <dl class="readout">
-        <div><dt>Depth</dt><dd id="anDepth">-</dd></div>
-        <div><dt>Eval</dt><dd id="anEval">-</dd></div>
-        <div><dt>Nodes</dt><dd id="anNodes">-</dd></div>
-        <div><dt>Speed</dt><dd id="anSpeed">-</dd></div>
+        <div><dt data-sheet="Passes">Depth</dt><dd id="anDepth">-</dd></div>
+        <div><dt data-sheet="Delta">Eval</dt><dd id="anEval">-</dd></div>
+        <div><dt data-sheet="Cells">Nodes</dt><dd id="anNodes">-</dd></div>
+        <div><dt data-sheet="Rate">Speed</dt><dd id="anSpeed">-</dd></div>
       </dl>
       <div class="pv" id="anPv"></div>
 
-      <label class="label" for="nbest">Score my options</label>
+      <label class="label" for="nbest" data-sheet="Projections">Score my options</label>
       <select id="nbest">
         <option value="0" selected>Off</option>
-        <option value="3">Top 3 moves</option>
-        <option value="5">Top 5 moves</option>
-        <option value="10">Top 10 moves</option>
-        <option value="20">Top 20 moves</option>
+        <option value="3" data-sheet="Top 3 cells">Top 3 moves</option>
+        <option value="5" data-sheet="Top 5 cells">Top 5 moves</option>
+        <option value="10" data-sheet="Top 10 cells">Top 10 moves</option>
+        <option value="20" data-sheet="Top 20 cells">Top 20 moves</option>
       </select>
       <ol class="candidates" id="candList"></ol>
       <div class="review" id="review"></div>
       <button id="evalBarToggle" class="btn btn-toggle" aria-pressed="true">Evaluation bar on</button>
+      </div>
+      </details>
     </section>
 
     <details class="glossary">
@@ -164,12 +203,16 @@
         <dt>VCF</dt><dd>Victory by continuous fours: a forced win made only of fours, since each one must be answered.</dd>
         <dt>VCT</dt><dd>Victory by continuous threats, the same idea allowing open threes as well as fours.</dd>
         <dt>forbidden point</dt><dd>Renju only. A point Black may not play: double three, double four or overline.</dd>
+        <dt>value map</dt><dd>A dot on every empty point that is worth something, sized by what a stone there would build for the side to move and deny the other side. It reads the shapes on the board rather than searching, so it shows where the game is being decided, not which move is best.</dd>
       </dl>
     </details>
 
+    <details class="fold foot-fold" id="keysFold">
+    <summary class="label">Keys</summary>
     <footer class="foot">
-      <span>N new game</span><span>U undo</span><span>Shift+U hold to undo all</span><span>H hint on/off</span>
+      <span data-sheet="N new sheet">N new game</span><span>U undo</span><span data-sheet="Shift+U hold to clear">Shift+U hold to undo all</span><span data-sheet="H suggest on/off">H hint on/off</span><span data-sheet="V heatmap">V value map</span><span data-sheet="&larr; &rarr; step a version">&larr; &rarr; step a replay</span><span>Esc switches view</span>
     </footer>
+    </details>
   </aside>
   <button id="leftTab" class="panel-tab left" title="Show the move list">Moves</button>
   <button id="panelTab" class="panel-tab" title="Show the panel">Panel</button>
