@@ -17,7 +17,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const { chooseWindow } = require('./window-engine');
+const { windowedMove } = require('./window-engine');
 
 const ROOT = __dirname;
 const ENGINE_DIR = path.join(ROOT, 'engine');
@@ -522,30 +522,14 @@ async function playMove(opts) {
     return pick(engine, { size, rule, stones, engineColor, timeoutMs, nodes });
   }
 
-  const origin = chooseWindow(stones, WINDOW_MARGIN);
-  let reason = 'no valid window';
-  if (origin) {
-    const local = stones.map(s => [s[0] - origin.ox, s[1] - origin.oy, s[2]]);
-    const result = await pick(windowEngine, { size: 15, rule, stones: local, engineColor, timeoutMs, nodes });
-    const x = result.move.x + origin.ox, y = result.move.y + origin.oy;
-    const occupied = stones.some(s => s[0] === x && s[1] === y);
-    let forbidden = false;
-    if (!occupied && engineColor === 1) {
-      const { points } = await engine.run(() => engine.forbidden({ size, rule, stones, sideToMove: 1 }));
-      forbidden = points.some(p => p.x === x && p.y === y);
-    }
-    if (!occupied && !forbidden) {
-      return { move: { x, y }, info: result.info, source: { engine: 'window', origin, margin: WINDOW_MARGIN } };
-    }
-    reason = occupied ? 'window move on an occupied point' : 'window move forbidden for Black';
-  }
-
-  const budget = !origin ? { timeoutMs, nodes }
-    : handoverNodes > 0 ? { timeoutMs, nodes: handoverNodes }
-    : { timeoutMs: Math.max(30, Math.floor(timeoutMs / 4)), nodes };
-  const result = await pick(engine, Object.assign({ size, rule, stones, engineColor }, budget));
-  return Object.assign(result, { source: { engine: 'handover', reason, origin, margin: WINDOW_MARGIN } });
+  return windowedMove({ stones, engineColor, timeoutMs, nodes, handoverNodes, margin: WINDOW_MARGIN }, {
+    windowPick: o => pick(windowEngine, Object.assign({ size: 15, rule }, o)),
+    boardPick: o => pick(engine, Object.assign({ size, rule }, o)),
+    forbiddenPoints: s => engine.run(() => engine.forbidden({ size, rule, stones: s, sideToMove: 1 }))
+      .then(r => r.points)
+  });
 }
+
 let selected = null;
 
 const server = http.createServer(async (req, res) => {

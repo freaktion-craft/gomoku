@@ -80,4 +80,47 @@ function chooseWindow(stones, margin) {
   return best && { ox: best.ox, oy: best.oy };
 }
 
-module.exports = { W, N, chooseWindow };
+/* The move on a 19x19 renju board: from the window when a placement is valid and its
+   move is legal on the real board, otherwise from the 19x19 engine. A window move can be
+   wrong on the real board even though every stone is inside the window, because the fake
+   edge hides space: a three that looks closed against the edge can be open on the real
+   board and turn the move into a forbidden double three for Black. The occupied check is
+   a guard against a bad translation rather than something the window engine should do.
+
+   The engines come in as functions so the decision can be tested without Rapfi:
+     windowPick(opts)        -> { move, info } on the 15x15 board, window coordinates
+     boardPick(opts)         -> { move, info } on the 19x19 board
+     forbiddenPoints(stones) -> [{ x, y }] Black may not play on the 19x19 board
+   After a rejected window move the turn is already spent, so the 19x19 engine gets a
+   quarter of it (or `handoverNodes` when a test fixes the budget in nodes). */
+async function windowedMove(opts, engines) {
+  const { stones, engineColor, timeoutMs, nodes = 0, handoverNodes = 0, margin } = opts;
+  const origin = chooseWindow(stones, margin);
+  let reason = 'no valid window';
+  let proposed = null;
+
+  if (origin) {
+    const local = stones.map(s => [s[0] - origin.ox, s[1] - origin.oy, s[2]]);
+    const result = await engines.windowPick({ stones: local, engineColor, timeoutMs, nodes });
+    const x = result.move.x + origin.ox, y = result.move.y + origin.oy;
+    proposed = { x, y };
+    const occupied = stones.some(s => s[0] === x && s[1] === y);
+    let forbidden = false;
+    if (!occupied && engineColor === 1) {
+      const points = await engines.forbiddenPoints(stones);
+      forbidden = points.some(p => p.x === x && p.y === y);
+    }
+    if (!occupied && !forbidden) {
+      return { move: { x, y }, info: result.info, source: { engine: 'window', origin, margin } };
+    }
+    reason = occupied ? 'window move on an occupied point' : 'window move forbidden for Black';
+  }
+
+  const budget = !origin ? { timeoutMs, nodes }
+    : handoverNodes > 0 ? { timeoutMs, nodes: handoverNodes }
+    : { timeoutMs: Math.max(30, Math.floor(timeoutMs / 4)), nodes };
+  const result = await engines.boardPick(Object.assign({ stones, engineColor }, budget));
+  return Object.assign(result, { source: { engine: 'handover', reason, origin, margin, proposed } });
+}
+
+module.exports = { W, N, chooseWindow, windowedMove };
