@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
 const { windowedMove } = require('./window-engine');
+const { resistWithin } = require('./white-resistance');
 
 const ROOT = __dirname;
 const ENGINE_DIR = path.join(ROOT, 'engine');
@@ -133,6 +134,7 @@ class Rapfi {
   }
 
   start() {
+    if (this.retired) throw new Error('engine retired');
     if (this.proc) return;
     this.proc = spawn(exeFor(this.tag), [], { cwd: ENGINE_DIR });
     this.proc.stdout.on('data', chunk => this.onData(chunk));
@@ -190,6 +192,7 @@ class Rapfi {
 
   /* Serialise everything: the protocol is a single request/response stream. */
   run(job) {
+    if (this.retired) return Promise.reject(new Error('engine retired'));
     const next = this.queue.then(job, job);
     this.queue = next.catch(() => {});
     return next;
@@ -394,6 +397,16 @@ class Rapfi {
     setTimeout(() => { try { proc.kill(); } catch (e) {} }, 500);
     this.proc = null;
   }
+
+  /* Throw this instance away for good: kill the process at once (an engine stuck in a
+     search ignores END) and refuse any further work, so late calls from an abandoned
+     request fail fast instead of starting a new process. */
+  retire() {
+    this.retired = true;
+    const proc = this.proc;
+    this.proc = null;
+    if (proc) { try { proc.kill(); } catch (e) { /* already gone */ } }
+  }
 }
 
 /* ----------------------------------------------------------- build probing */
@@ -497,37 +510,83 @@ function sendJson(res, code, obj) {
   res.end(body);
 }
 
-/* Two engine processes. `engine` plays every size and rule except 19x19 renju, and serves
-   all analysis (hints, scored options, review, forbidden points) at every size, so
+/* Three engine processes. `engine` plays every size and rule except 19x19 renju, and
+   serves all analysis (hints, scored options, review, forbidden points) at every size, so
    evaluations stay on one scale. `windowEngine` only chooses moves for 19x19 renju,
-   inside a 15x15 window where the renju networks apply; it starts on first use. Keeping
-   the move choice on its own process is also what lets it ponder later without analysis
-   requests stopping it. */
+   inside a 15x15 window where the renju networks apply. `probeEngine` plays freestyle and
+   only answers White's trap search in lost renju positions (white-resistance.js). The
+   last two start on first use. Keeping the move choice on its own process is also what
+   lets it ponder later without analysis requests stopping it. */
 let engine = null;
 let windowEngine = null;
+let probeEngine = null;
+
+const rankedPoints = r => r.candidates
+  .map(c => ({ point: pointFromCoord(c.pv && c.pv[0]), eval: c.eval }))
+  .filter(c => c.point);
 
 /* The engine's move. Outside 19x19 renju this is the plain search (or the difficulty
    window's pick). On 19x19 renju the move comes from the 15x15 window when a valid
    placement exists and its move is legal on the real board; otherwise the 19x19 engine
    plays it, with a quarter of the turn if the window search already spent the turn.
-   `source` says which engine chose the move and why, for the game log. */
+   In renju, when that move leaves White mated by force, White's resistance policy may
+   swap it for the losing move that sets Black the best forbidden-point trap (`resist:
+   false` turns that off). `source` says which engine chose the move and why, for the
+   game log. */
 async function playMove(opts) {
-  const { size, rule, stones, engineColor, timeoutMs, window: slack, nodes, handoverNodes } = opts;
+  const { size, rule, stones, engineColor, timeoutMs, window: slack, nodes, handoverNodes, resist: resistOn = true, probeNodes } = opts;
   // At the top level there is nothing to sample from, so the plain search is both the
   // right answer and the cheaper way to get it.
   const pick = (eng, o) => eng.run(() => slack > 0
     ? eng.choose(Object.assign({ window: slack }, o))
     : eng.think(Object.assign({ strength: 100 }, o)));
 
-  if (size !== 19 || rule !== RULES.renju) {
-    return pick(engine, { size, rule, stones, engineColor, timeoutMs, nodes });
-  }
+  const result = size === 19 && rule === RULES.renju
+    ? await windowedMove({ stones, engineColor, timeoutMs, nodes, handoverNodes, margin: WINDOW_MARGIN }, {
+        windowPick: o => pick(windowEngine, Object.assign({ size: 15, rule }, o)),
+        boardPick: o => pick(engine, Object.assign({ size, rule }, o)),
+        forbiddenPoints: s => engine.run(() => engine.forbidden({ size, rule, stones: s, sideToMove: 1 }))
+          .then(r => r.points)
+      })
+    : await pick(engine, { size, rule, stones, engineColor, timeoutMs, nodes });
 
-  return windowedMove({ stones, engineColor, timeoutMs, nodes, handoverNodes, margin: WINDOW_MARGIN }, {
-    windowPick: o => pick(windowEngine, Object.assign({ size: 15, rule }, o)),
-    boardPick: o => pick(engine, Object.assign({ size, rule }, o)),
+  if (!resistOn || rule !== RULES.renju || engineColor !== 2) return result;
+
+  const freestyle = RULES.freestyle;
+  /* The policy only ever improves on a move that is already chosen, so it must never cost
+     one. If it fails, or runs well past its 30% budget, the chosen move is played. The
+     freestyle probe is disposable: on any failure the instance this request used is killed
+     and a fresh one starts on next use, so a probe stuck mid-search never holds a queue. */
+  const giveUpMs = Math.floor(timeoutMs * 0.3) + 1000;
+  const probe = probeEngine;
+  const resisted = await resistWithin({
+    stones, ownMove: result.move, ownEval: result.info && result.info.eval, timeoutMs, probeNodes, size
+  }, {
+    candidates: (s, b) => engine.run(() => engine.analyze(Object.assign({ size, rule, stones: s, sideToMove: 2, count: 5 }, b)))
+      .then(rankedPoints),
     forbiddenPoints: s => engine.run(() => engine.forbidden({ size, rule, stones: s, sideToMove: 1 }))
-      .then(r => r.points)
+      .then(r => r.points),
+    naturalMoves: (s, count, b) => probe.run(() => probe.analyze(Object.assign({ size, rule: freestyle, stones: s, sideToMove: 1, count }, b)))
+      .then(rankedPoints),
+    legalBest: (s, b) => engine.run(() => engine.think(Object.assign({ size, rule, stones: s, engineColor: 1, strength: 100 }, b)))
+      .then(r => ({ point: r.move, eval: r.info.eval })),
+    freestyleEval: (s, b) => probe.run(() => probe.think(Object.assign({ size, rule: freestyle, stones: s, engineColor: 2, strength: 100 }, b)))
+      .then(r => r.info.eval)
+  }, giveUpMs, err => {
+    broadcast('engine', 'resistance skipped: ' + err.message);
+    if (probeEngine === probe) {
+      probe.retire();
+      probeEngine = new Rapfi(probe.tag);
+    }
+  });
+
+  if (!resisted) return result;
+  if (resisted.error) {
+    return Object.assign({}, result, { source: Object.assign({}, result.source, { resistanceError: resisted.error }) });
+  }
+  return Object.assign({}, result, {
+    move: resisted.move,
+    source: Object.assign({}, result.source, { resistance: resisted.report })
   });
 }
 
@@ -570,9 +629,11 @@ const server = http.createServer(async (req, res) => {
       // Node caps for deterministic tests only (test/window-parity.js); 0 is no cap.
       const nodes = Math.max(0, Math.floor(Number(body.nodes)) || 0);
       const handoverNodes = Math.max(0, Math.floor(Number(body.handoverNodes)) || 0);
+      const probeNodes = Math.max(0, Math.floor(Number(body.probeNodes)) || 0);
+      const resistOn = body.resist !== false;
 
       const result = await playMove({
-        size, rule, stones, engineColor, timeoutMs, window, nodes, handoverNodes
+        size, rule, stones, engineColor, timeoutMs, window, nodes, handoverNodes, resist: resistOn, probeNodes
       });
       return sendJson(res, 200, result);
     } catch (err) {
@@ -636,6 +697,7 @@ const server = http.createServer(async (req, res) => {
   if (url === '/api/newgame' && req.method === 'POST') {
     if (engine) await engine.run(() => engine.newGame());
     if (windowEngine) await windowEngine.run(() => windowEngine.newGame());
+    if (probeEngine) await probeEngine.run(() => probeEngine.newGame());
     return sendJson(res, 200, { ok: true });
   }
 
@@ -654,6 +716,7 @@ const server = http.createServer(async (req, res) => {
       engine = new Rapfi(selected.tag);
       engine.start();
       windowEngine = new Rapfi(selected.tag);   // spawned by its first 19x19 renju move
+      probeEngine = new Rapfi(selected.tag);    // spawned by White's first lost renju position
     } else {
       console.log('  no runnable Rapfi build - the UI will fall back to the built-in engine');
     }
@@ -675,6 +738,7 @@ const server = http.createServer(async (req, res) => {
 function shutdown() {
   if (engine) engine.stop();
   if (windowEngine) windowEngine.stop();
+  if (probeEngine) probeEngine.stop();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);
