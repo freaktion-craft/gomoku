@@ -2,38 +2,66 @@
 (function (global) {
   'use strict';
 
-  var SIZE = 15;
-  var N = SIZE * SIZE;
+  /* 19x19 renju on a Go board is what this app is mostly played at; 15x15 is
+     the official renju board and stays available. */
+  var SIZES = [15, 19];
+  var DEFAULT_SIZE = 19;
   var EMPTY = 0, BLACK = 1, WHITE = 2;
   var DIRS = [[1, 0], [0, 1], [1, 1], [1, -1]];
   var WIN_SCORE = 1e9;
 
-  /* ---- precomputed line geometry ------------------------------------- */
+  /* ---- precomputed geometry, one set per board size ---------------------
+     `lines[id]` holds the cell indices along one line of at least five points,
+     `cellLines[cell]` the ids of the four lines through a cell, and
+     `near[cell]` the points within two of it. Built once per size and shared
+     by every board of that size. */
 
-  var LINES = [];            // LINES[id] = array of cell indices
-  var CELL_LINES = [];       // CELL_LINES[cell] = ids of the 4 lines through it
+  var GEOMETRY = {};
 
-  (function buildLines() {
-    for (var c = 0; c < N; c++) CELL_LINES.push([]);
+  function geometry(size) {
+    if (GEOMETRY[size]) return GEOMETRY[size];
+    var n = size * size, lines = [], cellLines = [], near = [], c, x, y;
+
+    for (c = 0; c < n; c++) cellLines.push([]);
     for (var d = 0; d < DIRS.length; d++) {
       var dx = DIRS[d][0], dy = DIRS[d][1];
-      for (var y = 0; y < SIZE; y++) {
-        for (var x = 0; x < SIZE; x++) {
+      for (y = 0; y < size; y++) {
+        for (x = 0; x < size; x++) {
           var px = x - dx, py = y - dy;
-          if (px >= 0 && px < SIZE && py >= 0 && py < SIZE) continue; // not a line start
+          if (px >= 0 && px < size && py >= 0 && py < size) continue; // not a line start
           var cells = [], cx = x, cy = y;
-          while (cx >= 0 && cx < SIZE && cy >= 0 && cy < SIZE) {
-            cells.push(cy * SIZE + cx);
+          while (cx >= 0 && cx < size && cy >= 0 && cy < size) {
+            cells.push(cy * size + cx);
             cx += dx; cy += dy;
           }
           if (cells.length < 5) continue;
-          var id = LINES.length;
-          LINES.push(cells);
-          for (var i = 0; i < cells.length; i++) CELL_LINES[cells[i]].push(id);
+          var id = lines.length;
+          lines.push(cells);
+          for (var i = 0; i < cells.length; i++) cellLines[cells[i]].push(id);
         }
       }
     }
-  })();
+
+    for (c = 0; c < n; c++) {
+      var x0 = c % size, y0 = (c / size) | 0, list = [];
+      for (var ny = -2; ny <= 2; ny++) {
+        for (var nx = -2; nx <= 2; nx++) {
+          if (!nx && !ny) continue;
+          x = x0 + nx; y = y0 + ny;
+          if (x < 0 || x >= size || y < 0 || y >= size) continue;
+          list.push(y * size + x);
+        }
+      }
+      near.push(list);
+    }
+
+    GEOMETRY[size] = { size: size, n: n, lines: lines, cellLines: cellLines, near: near };
+    return GEOMETRY[size];
+  }
+
+  function sizeOrDefault(size) {
+    return SIZES.indexOf(Number(size)) >= 0 ? Number(size) : DEFAULT_SIZE;
+  }
 
   /* ---- pattern scoring ------------------------------------------------ */
   /* A line is rendered as a string: 'x' = the player, 'o' = opponent, '.' = empty.
@@ -71,11 +99,13 @@
 
   /* ---- board ---------------------------------------------------------- */
 
-  function Board(perception) {
+  function Board(perception, size) {
     this.perception = perception || null;
-    this.cells = new Int8Array(N);
+    this.geo = geometry(sizeOrDefault(size));
+    this.size = this.geo.size;
+    this.cells = new Int8Array(this.geo.n);
     this.history = [];
-    this.lineScore = [null, new Int32Array(LINES.length), new Int32Array(LINES.length)];
+    this.lineScore = [null, new Int32Array(this.geo.lines.length), new Int32Array(this.geo.lines.length)];
     this.total = [0, 0, 0];
     this.stones = 0;
   }
@@ -90,7 +120,7 @@
     return this;
   };
 
-  Board.prototype.at = function (x, y) { return this.cells[y * SIZE + x]; };
+  Board.prototype.at = function (x, y) { return this.cells[y * this.size + x]; };
 
   Board.prototype.tierValue = function (t) {
     var scale = this.perception ? this.perception[TIERS[t].key] : null;
@@ -109,7 +139,7 @@
   };
 
   Board.prototype.lineToString = function (lineId, player) {
-    var cells = LINES[lineId], out = '';
+    var cells = this.geo.lines[lineId], out = '';
     for (var i = 0; i < cells.length; i++) {
       var v = this.cells[cells[i]];
       out += v === EMPTY ? '.' : (v === player ? 'x' : 'o');
@@ -118,7 +148,7 @@
   };
 
   Board.prototype.refreshLines = function (cell) {
-    var ids = CELL_LINES[cell];
+    var ids = this.geo.cellLines[cell];
     for (var i = 0; i < ids.length; i++) {
       var id = ids[i];
       for (var p = 1; p <= 2; p++) {
@@ -151,7 +181,7 @@
   Board.prototype.winningLineAt = function (cell, exactFive) {
     var player = this.cells[cell];
     if (!player) return null;
-    var x0 = cell % SIZE, y0 = (cell / SIZE) | 0;
+    var SIZE = this.size, x0 = cell % SIZE, y0 = (cell / SIZE) | 0;
     for (var d = 0; d < DIRS.length; d++) {
       var dx = DIRS[d][0], dy = DIRS[d][1];
       var run = [cell], x, y, s;
@@ -176,30 +206,19 @@
     return this.winningLineAt(cell) !== null;
   };
 
-  Board.prototype.isFull = function () { return this.stones >= N; };
+  Board.prototype.isFull = function () { return this.stones >= this.geo.n; };
+
+  /* The centre point, where the first stone goes. */
+  Board.prototype.center = function () {
+    return (this.size >> 1) * this.size + (this.size >> 1);
+  };
 
   /* ---- move generation ------------------------------------------------ */
-
-  var NEAR = [];
-  (function buildNear() {
-    for (var c = 0; c < N; c++) {
-      var x0 = c % SIZE, y0 = (c / SIZE) | 0, list = [];
-      for (var dy = -2; dy <= 2; dy++) {
-        for (var dx = -2; dx <= 2; dx++) {
-          if (!dx && !dy) continue;
-          var x = x0 + dx, y = y0 + dy;
-          if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) continue;
-          list.push(y * SIZE + x);
-        }
-      }
-      NEAR.push(list);
-    }
-  })();
 
   /* How much `player`'s own score would grow by playing `cell`. */
   Board.prototype.gainAt = function (cell, player) {
     this.cells[cell] = player;
-    var ids = CELL_LINES[cell], gain = 0;
+    var ids = this.geo.cellLines[cell], gain = 0;
     for (var i = 0; i < ids.length; i++) {
       gain += this.scoreLine(this.lineToString(ids[i], player)) - this.lineScore[player][ids[i]];
     }
@@ -216,10 +235,10 @@
      `defendWeight` overrides that discount, for a caller that wants to weigh
      attack against defence differently from the search. */
   Board.prototype.influence = function (player, defendWeight) {
-    var seen = new Uint8Array(N), list = [], opp = 3 - player;
+    var seen = new Uint8Array(this.geo.n), list = [], opp = 3 - player;
     var weight = defendWeight == null ? 0.85 : defendWeight;
     for (var h = 0; h < this.history.length; h++) {
-      var near = NEAR[this.history[h]];
+      var near = this.geo.near[this.history[h]];
       for (var i = 0; i < near.length; i++) {
         var c = near[i];
         if (this.cells[c] !== EMPTY || seen[c]) continue;
@@ -233,7 +252,7 @@
 
   /* Empty points within 2 of a stone, best-looking first. */
   Board.prototype.candidates = function (player, limit) {
-    if (this.stones === 0) return [(SIZE >> 1) * SIZE + (SIZE >> 1)];
+    if (this.stones === 0) return [this.center()];
     var list = this.influence(player);
     if (limit && list.length > limit) list.length = limit;
     var out = [];
@@ -314,7 +333,7 @@
 
   /* Pick a move for `player`. Depth 1 plays greedily with a little noise. */
   Board.prototype.bestMove = function (player, depth, slack) {
-    if (this.stones === 0) return (SIZE >> 1) * SIZE + (SIZE >> 1);
+    if (this.stones === 0) return this.center();
     var opp = 3 - player, i, m, hit;
 
     var moves = this.candidates(player, 24);
@@ -368,15 +387,20 @@
 
   /* ---- notation ------------------------------------------------------- */
 
-  var COLUMNS = 'ABCDEFGHIJKLMNO'; // Gomocup notation: 'I' is included
+  /* Gomocup notation, which is what Rapfi prints: 'I' is included, so the
+     columns of a 19x19 board run A to S, and row 1 is at the bottom. */
+  var COLUMNS = 'ABCDEFGHIJKLMNOPQRS';
 
-  function toCoord(cell) {
-    return COLUMNS[cell % SIZE] + (SIZE - ((cell / SIZE) | 0));
+  function toCoord(cell, size) {
+    size = sizeOrDefault(size);
+    return COLUMNS[cell % size] + (size - ((cell / size) | 0));
   }
 
   var api = {
     Board: Board,
-    SIZE: SIZE,
+    SIZES: SIZES,
+    DEFAULT_SIZE: DEFAULT_SIZE,
+    sizeOrDefault: sizeOrDefault,
     EMPTY: EMPTY,
     BLACK: BLACK,
     WHITE: WHITE,

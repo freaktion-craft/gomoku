@@ -94,6 +94,7 @@ an Intel Mac has to build Rapfi from source or fall back to `local-engine.js`.
 | Opponent | which colour Rapfi plays, two-player hotseat, or tactics |
 | Difficulty | how close to its best move the engine will settle for; see below |
 | Rule | renju (the default), freestyle (five or more), or standard (exactly five) |
+| Board | 19 × 19 (the default) or 15 × 15; changing it starts a new game |
 | Score my options | rank the best placements for the side to move, with an evaluation on each |
 | Tactics | the engine never plays a stone: you make every move for both sides and it scores each position as you go |
 | Sparring | the engine plays itself, paced so you can follow, holding on every mistake |
@@ -251,10 +252,38 @@ setting; Light and Dark override it and are remembered in this browser. The
 board is drawn from the same CSS variables as the panel, so the grid, stones
 and markers all move with the theme rather than needing a second palette.
 
-Coordinates follow Gomocup notation: columns `A` to `O` with `I` included (not Go
-notation), rows 1 to 15 from the bottom. They are drawn once each, letters along
-the bottom edge and numbers down the right. This is what Rapfi prints in its PV, so the
+Coordinates follow Gomocup notation: columns from `A` with `I` included (not Go
+notation), rows from 1 at the bottom - `A` to `S` and 1 to 19 on the 19 × 19
+board, `A` to `O` and 1 to 15 on the 15 × 15 one. They are drawn once each,
+letters along the bottom edge and numbers down the right. This is what Rapfi
+prints in its PV (checked at 19 × 19: the last column comes out as `S`), so the
 move list and the engine output read the same way.
+
+## Board size
+
+**19 × 19 is the default**, because that is the board most games here are played
+on: renju on a Go board. 15 × 15, the official renju board, is the other
+choice. The size is remembered in this browser, and changing it starts a new
+game. The marked points follow the board: the nine of a Go board on 19 × 19,
+the five of a renju board on 15 × 15.
+
+Rapfi itself is not tied to 15 × 15, but its neural networks are. The renju
+networks shipped with the release only accept 15 × 15, so on 19 × 19 Rapfi prints
+`Evaluator mix9svq disabled: no compatible weight config found` and plays on its
+classical evaluator. Everything works; it is simply not as strong there as on
+15 × 15 until a 19 × 19 renju network exists.
+
+A saved game keeps the size it was played at, and a replay puts the board at
+that size while it is open, handing the live game back at its own size when it
+closes. Games saved before the size was a setting carry no size and are read as
+15 × 15, which is what they all were.
+
+The built-in engine behind Beginner and Casual reads shapes along each line, so
+its perception tables mean the same thing on either board. Checked by replaying
+the same positions on both sizes, offset to the middle of the 19 × 19 board:
+the top four candidates matched in all but 43 of about 3,200 positions, and every
+one of those had a stone near the edge of the 15 × 15 board, where the larger
+board genuinely has more room. A move takes about a fifth longer on 19 × 19.
 
 ## Rules
 
@@ -477,13 +506,16 @@ The record carries the notation a person reads and the engine coordinates a tool
 wants, so it can go either way:
 
 ```json
-{ "app": "rapfi-gomoku", "size": 15, "rule": "renju",
+{ "app": "rapfi-gomoku", "size": 19, "rule": "renju",
   "opponent": "ai-white", "difficulty": "full", "result": "unfinished",
   "moves": [
     { "n": 3, "player": "black", "coord": "J6", "x": 9, "y": 5,
       "eval": 62, "grade": "Inaccuracy", "best": "I8", "shape": "open two" }
   ] }
 ```
+
+`size` is the board the game was played on, and the coordinates only mean
+something together with it.
 
 `coord` is always gomoku notation and `grade` is always the plain name: the file
 is a record, not a screenshot.

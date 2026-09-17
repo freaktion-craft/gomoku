@@ -5,7 +5,12 @@
   'use strict';
 
   var G = window.Gomoku;
-  var SIZE = G.SIZE, BLACK = G.BLACK, WHITE = G.WHITE, EMPTY = G.EMPTY;
+  var BLACK = G.BLACK, WHITE = G.WHITE, EMPTY = G.EMPTY;
+
+  /* The size of the board on screen. It is a setting, but a replay can take
+     the board over at the size its own game was played at, so this follows
+     whatever the board is showing rather than what the control says. */
+  var SIZE = G.DEFAULT_SIZE;
 
   /* Canvas colours come from the stylesheet so the board follows the theme
      without a second palette to keep in step. Refreshed whenever it changes. */
@@ -31,7 +36,13 @@
     }
   }
 
-  var STAR = [[3, 3], [3, 11], [11, 3], [11, 11], [7, 7]];
+  /* The marked points. A 15x15 board carries the five of a renju board; a
+     19x19 one the nine of a Go board, which is what it usually is. */
+  var STARS = {
+    15: [[3, 3], [3, 11], [11, 3], [11, 11], [7, 7]],
+    19: [[3, 3], [3, 9], [3, 15], [9, 3], [9, 9], [9, 15], [15, 3], [15, 9], [15, 15]]
+  };
+  var STAR = STARS[SIZE];
 
   var canvas = document.getElementById('board');
   var ctx = canvas.getContext('2d');
@@ -48,12 +59,14 @@
    'tabMoves', 'tabHistory', 'history', 'gameList', 'historyClear',
    'movesFoot', 'exportGame', 'exportReplay', 'reviewGame', 'reviewSummary', 'replayNote',
    'replay', 'replayTitle', 'replayLog', 'replayStart', 'replayPrev',
-   'replayNext', 'replayEnd', 'replayClose', 'spectateBar', 'spectateUndo'].forEach(function (id) {
+   'replayNext', 'replayEnd', 'replayClose', 'spectateBar', 'spectateUndo',
+   'boardSize'].forEach(function (id) {
     els[id] = document.getElementById(id);
   });
 
-  var board = new G.Board();
+  var board = new G.Board(null, SIZE);
   var state = {
+    gameSeq: 0,         // a move searched for in a game since abandoned is dropped
     turn: BLACK,
     over: false,
     winner: 0,
@@ -153,11 +166,12 @@
   var SPECTATE = /[?&]spectate(?:[=&]|$)/.test(location.search);
   var SPECTATE_TITLE = 'Gomoku spectator';
 
-  /* How a point is written down: the board's own notation, A-O with row 1 at
-     the bottom, the same form the engine prints. */
-  function coordText(cell) {
+  /* How a point is written down: the board's own notation, A-O or A-S with
+     row 1 at the bottom, the same form the engine prints. `size` is for moves
+     from a board other than the one on screen. */
+  function coordText(cell, size) {
     if (cell == null || cell < 0) return '';
-    return G.toCoord(cell);
+    return G.toCoord(cell, size || SIZE);
   }
 
 
@@ -324,15 +338,46 @@
 
   /* ---- coordinates ------------------------------------------------------
      A cell index is row * SIZE + col with row 0 drawn at the top. Rapfi uses
-     y = 0 at the bottom, so the two differ by a flip. Column letters are
-     A-O with I included, which is what Rapfi prints in its principal variation. */
+     y = 0 at the bottom, so the two differ by a flip. Column letters run from
+     A with I included, which is what Rapfi prints in its principal variation:
+     A-O on 15x15, A-S on 19x19. */
 
   function colOf(cell) { return cell % SIZE; }
   function rowOf(cell) { return (cell / SIZE) | 0; }
-  function toEngine(cell) { return { x: colOf(cell), y: SIZE - 1 - rowOf(cell) }; }
-  function fromEngine(x, y) { return (SIZE - 1 - y) * SIZE + x; }
+  function toEngine(cell, size) {
+    var n = size || SIZE;
+    return { x: cell % n, y: n - 1 - ((cell / n) | 0) };
+  }
+  function fromEngine(x, y) {
+    if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) return -1;
+    return (SIZE - 1 - y) * SIZE + x;
+  }
+
+  /* The size the control asks for, which new games are played at. */
+  function chosenSize() { return G.sizeOrDefault(els.boardSize.value); }
+
+  /* Put a board of `size` on screen. Every board object is built for one
+     size, so a change of size is a fresh board rather than a resized one. */
+  function setBoardSize(size) {
+    size = G.sizeOrDefault(size);
+    if (size === SIZE && board.size === size) return;
+    SIZE = size;
+    STAR = STARS[size];
+    board = new G.Board(null, size);
+    novice = new G.Board(null, size);
+    state.hover = -1;
+    state.hint = -1;
+    if (state.metrics) layout();
+  }
 
   function isRenju() { return els.rule.value === 'renju'; }
+
+  /* The rule of the position on the board: a replayed game keeps the rule it
+     was played under, whatever the control is set to now. */
+  function boardRule() {
+    var game = isReplaying() ? state.games[state.replay.index] : null;
+    return game && game.rule ? game.rule : els.rule.value;
+  }
 
   /* Who has to make exactly five. Freestyle lets both sides win with five or
      more; standard requires exactly five from both; renju restricts Black only,
@@ -349,11 +394,11 @@
 
   /* "J10" as printed by Rapfi -> a cell index. */
   function cellFromCoord(token) {
-    var m = /^([A-O])(\d{1,2})$/i.exec(token || '');
+    var m = /^([A-Z])(\d{1,2})$/i.exec(token || '');
     if (!m) return -1;
     var x = G.COLUMNS.indexOf(m[1].toUpperCase());
     var y = Number(m[2]) - 1;
-    if (x < 0 || y < 0 || y >= SIZE) return -1;
+    if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) return -1;
     return fromEngine(x, y);
   }
 
@@ -631,7 +676,7 @@
 
   /* A level with a perception table is played by the bundled engine, on its own
      board so the live one keeps reading shapes truly for the coaching. */
-  var novice = new G.Board();
+  var novice = new G.Board(null, SIZE);
 
   function noviceMove(color, level) {
     novice.reset();
@@ -931,13 +976,17 @@
   /* Games come back out of storage, so a row is built from the words in those
      two tables rather than from whatever the record happens to hold. */
   function gameMeta(game) {
-    var meta = game.moves.length + ' moves';
+    var meta = game.moves.length + ' moves · ' + gameSize(game) + '×' + gameSize(game);
     if (MODE_LABEL[game.mode]) meta += ' · ' + MODE_LABEL[game.mode];
     if (RULE_LABEL[game.rule]) meta += ' · ' + RULE_LABEL[game.rule];
     return meta;
   }
 
   function playerAt(index) { return index % 2 === 0 ? BLACK : WHITE; }
+
+  /* Moves are stored as cell indices, which only mean something at a known
+     size. Games saved before the size was a setting were all 15x15. */
+  function gameSize(game) { return game && game.size === 19 ? 19 : 15; }
 
   function isReplaying() { return !!state.replay; }
 
@@ -975,9 +1024,11 @@
      it again would otherwise file the same game twice, so an identical game at
      the top of the list is left alone. */
   function recordGame() {
-    if (state.games.length && sameMoves(state.games[0].moves, board.history)) return;
+    if (state.games.length && gameSize(state.games[0]) === SIZE &&
+        sameMoves(state.games[0].moves, board.history)) return;
     state.games.unshift({
       at: Date.now(),
+      size: SIZE,
       rule: els.rule.value,
       mode: els.mode.value,
       winner: state.winner,
@@ -1021,6 +1072,7 @@
         index: index,
         ply: 0,
         saved: {
+          size: SIZE,
           moves: board.history.slice(),
           turn: state.turn,
           over: state.over,
@@ -1054,6 +1106,7 @@
     if (!game) { closeReplay(); return; }
 
     r.ply = Math.max(0, Math.min(game.moves.length, n));
+    setBoardSize(gameSize(game));
     replayTo(game.moves, r.ply);
     state.grades = (game.grades || []).slice(0, r.ply);
     state.turn = playerAt(r.ply);
@@ -1078,6 +1131,7 @@
     var saved = r.saved;
     state.replay = null;
 
+    setBoardSize(saved.size);
     replayTo(saved.moves, saved.moves.length);
     state.shapes = saved.shapes;
     state.grades = saved.grades;
@@ -1125,22 +1179,23 @@
   function sideName(player) { return player === BLACK ? 'black' : 'white'; }
 
   function gameRecord(moves, grades, shapes, meta) {
+    var size = meta.size;
     return {
       app: 'rapfi-gomoku',
       savedAt: new Date().toISOString(),
-      size: SIZE,
+      size: size,
       rule: meta.rule,
       opponent: meta.mode,
       difficulty: meta.difficulty || null,
       result: meta.result,
       moves: moves.map(function (cell, i) {
-        var point = toEngine(cell);
+        var point = toEngine(cell, size);
         var grade = grades ? grades[i] : null;
         var shape = shapes ? shapes[i] : null;
         var row = {
           n: i + 1,
           player: sideName(playerAt(i)),
-          coord: G.toCoord(cell),
+          coord: G.toCoord(cell, size),
           x: point.x,
           y: point.y
         };
@@ -1148,7 +1203,7 @@
           row.eval = grade.value;
           row.grade = grade.grade;
           if (grade.bestCell >= 0 && grade.bestCell !== cell) {
-            row.best = G.toCoord(grade.bestCell);
+            row.best = G.toCoord(grade.bestCell, size);
           }
           if (grade.bestShape) row.bestMakes = grade.bestShape;
           if (grade.bestLine) row.bestLine = grade.bestLine;
@@ -1169,6 +1224,7 @@
     var live = isReplaying() ? state.replay.saved : state;
     var moves = isReplaying() ? state.replay.saved.moves : board.history;
     return gameRecord(moves, live.grades, live.shapes, {
+      size: isReplaying() ? state.replay.saved.size : SIZE,
       rule: els.rule.value,
       mode: els.mode.value,
       difficulty: els.difficulty.value,
@@ -1178,6 +1234,7 @@
 
   function savedRecord(game) {
     var record = gameRecord(game.moves, game.grades, null, {
+      size: gameSize(game),
       rule: game.rule,
       mode: game.mode,
       difficulty: null,
@@ -1208,8 +1265,9 @@
   }
 
   /* One row per move, shared by the live log and the replay log. `current` is
-     the move being shown, 1-based; anything after it is still to come. */
-  function movelogHtml(moves, grades, current) {
+     the move being shown, 1-based; anything after it is still to come. `size`
+     is the board the moves were played on. */
+  function movelogHtml(moves, grades, current, size) {
     var html = '';
     for (var i = 0; i < moves.length; i++) {
       var g = grades ? grades[i] : null;
@@ -1220,7 +1278,7 @@
       html += '<li class="' + cls + '" data-ply="' + (i + 1) + '">' +
               '<span class="n">' + (i + 1) + '</span>' +
               '<span class="sd">' + name(playerAt(i)).charAt(0) + '</span>' +
-              '<span class="c">' + coordText(moves[i]) + '</span>' +
+              '<span class="c">' + coordText(moves[i], size) + '</span>' +
               '<span class="ev">' + (g ? formatValue(g.value) : '') + '</span>' +
               '<span class="q">' + (g ? g.grade : '') + '</span>' +
               '</li>';
@@ -1274,7 +1332,7 @@
     els.reviewSummary.hidden = !game.review;
     els.replayNote.innerHTML = reviewText(game.moves, game.grades || [], r.ply - 1, true);
 
-    els.replayLog.innerHTML = movelogHtml(game.moves, game.grades, r.ply);
+    els.replayLog.innerHTML = movelogHtml(game.moves, game.grades, r.ply, gameSize(game));
     var row = els.replayLog.querySelector ? els.replayLog.querySelector('li.last') : null;
     if (row) {
       // Keep the move being shown in view without scrolling the panel itself.
@@ -1443,7 +1501,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         size: SIZE,
-        rule: els.rule.value,
+        rule: boardRule(),
         stones: stonesForEngine(),
         sideToMove: sideToMove,
         timeoutMs: timeoutMs,
@@ -1818,7 +1876,7 @@
       else if ((f = /^Eval\s+(\S+)$/i.exec(part))) info.eval = f[1];
       else if ((f = /^Node\s+(\S+)$/i.exec(part))) info.nodes = f[1];
       else if ((f = /^Speed\s+(\S+)$/i.exec(part))) info.speed = f[1];
-      else if (/^[A-O]\d{1,2}(\s+[A-O]\d{1,2})*$/i.test(part)) pv = part.split(/\s+/);
+      else if (/^[A-Z]\d{1,2}(\s+[A-Z]\d{1,2})*$/i.test(part)) pv = part.split(/\s+/);
     });
     if (sawDepth && pv) info.pv = pv;
     return info;
@@ -2012,7 +2070,11 @@
     state.error = '';
     clearCandidates();
     render();
+    var seq = state.gameSeq;
     askForMove(color).then(function (res) {
+      // A new game was started while this was searched for, possibly on a
+      // board of another size: the move belongs to nothing on screen.
+      if (seq !== state.gameSeq) return;
       state.thinking = false;
       // The engine's own reading of this position grades the move that led to
       // it, and becomes the baseline for grading the engine's reply.
@@ -2041,6 +2103,7 @@
       else render();
       settle();
     }, function (err) {
+      if (seq !== state.gameSeq) return;
       state.thinking = false;
       state.error = 'Engine error: ' + err.message;
       render();
@@ -2054,6 +2117,8 @@
     state.stoppedAt = -1;
     // A replay is holding the board: drop it, the new game replaces it anyway.
     if (isReplaying()) { state.replay = null; state.tab = 'moves'; store(TAB_KEY, 'moves'); }
+    state.gameSeq++;
+    setBoardSize(chosenSize());
     board.reset();
     state.turn = BLACK;
     state.over = false;
@@ -2280,7 +2345,8 @@
     // A replay has the board, so the live log comes from what it put aside.
     var moves = isReplaying() ? state.replay.saved.moves : board.history;
     var grades = isReplaying() ? state.replay.saved.grades : state.grades;
-    els.movelog.innerHTML = movelogHtml(moves, grades, moves.length);
+    els.movelog.innerHTML = movelogHtml(moves, grades, moves.length,
+                                        isReplaying() ? state.replay.saved.size : SIZE);
     if (moves.length) els.movelog.scrollTop = els.movelog.scrollHeight;
 
     renderReview();
@@ -2478,6 +2544,10 @@
     wantedRule = els.rule.value;
     newGame();
   });
+  els.boardSize.addEventListener('change', function () {
+    store(SIZE_KEY, String(chosenSize()));
+    newGame();
+  });
   els.nbest.addEventListener('change', requestAnalysis);
 
   els.evalBarToggle.addEventListener('click', function () {
@@ -2565,6 +2635,7 @@
   var PACE_KEY = 'gomoku.pace';
   var PANEL_KEY = 'gomoku.panel';
   var LEFT_KEY = 'gomoku.leftpanel';
+  var SIZE_KEY = 'gomoku.size';
 
   /* Browser storage can throw outright in a private window. */
   function store(key, value) {
@@ -2625,6 +2696,8 @@
   /* ---- start ------------------------------------------------------------- */
 
   if (SPECTATE) document.title = SPECTATE_TITLE;
+  els.boardSize.value = String(G.sizeOrDefault(recall(SIZE_KEY)));
+  setBoardSize(chosenSize());
   initTheme();
   state.evalBarOn = recall(EVALBAR_KEY) !== 'off';
   state.valueMapOn = recall(VALUEMAP_KEY) === 'on';

@@ -34,11 +34,17 @@ const RULES = { freestyle: 0, standard: 1, renju: 4 };
 
 
 /* Gomocup notation, the form Rapfi prints a principal variation in: column
-   letters A-O with 'I' included, row 1 at the bottom. */
-const COLUMNS = 'ABCDEFGHIJKLMNO';
+   letters from A with 'I' included (A-O on 15x15, A-S on 19x19, up to T on the
+   largest board accepted here), row 1 at the bottom. */
+const COLUMNS = 'ABCDEFGHIJKLMNOPQRST';
+const DEFAULT_SIZE = 19;
+
+function boardSize(value) {
+  return Math.min(COLUMNS.length, Math.max(5, Number(value) || DEFAULT_SIZE));
+}
 
 function pointFromCoord(token) {
-  const m = /^([A-O])(\d{1,2})$/i.exec(String(token || ''));
+  const m = /^([A-T])(\d{1,2})$/i.exec(String(token || ''));
   if (!m) return null;
   const x = COLUMNS.indexOf(m[1].toUpperCase());
   const y = Number(m[2]) - 1;
@@ -84,7 +90,7 @@ function makeInfoCollector() {
       else if ((f = /^Node\s+(\S+)$/i.exec(part))) info.nodes = f[1];
       else if ((f = /^Speed\s+(\S+)$/i.exec(part))) info.speed = f[1];
       else if ((f = /^Time\s+(\d+)ms$/i.exec(part))) info.timeMs = Number(f[1]);
-      else if (/^[A-O]\d{1,2}(\s+[A-O]\d{1,2})*$/i.test(part)) pv = part.split(/\s+/);
+      else if (/^[A-T]\d{1,2}(\s+[A-T]\d{1,2})*$/i.test(part)) pv = part.split(/\s+/);
     }
     if (sawDepth && pv) info.pv = pv;
   };
@@ -496,7 +502,7 @@ const server = http.createServer(async (req, res) => {
     if (!engine) return sendJson(res, 503, { error: 'no usable Rapfi build was found' });
     try {
       const body = await readJson(req);
-      const size = Math.min(20, Math.max(5, Number(body.size) || 15));
+      const size = boardSize(body.size);
       const rule = RULES[body.rule] != null ? RULES[body.rule] : 0;
       const stones = Array.isArray(body.stones) ? body.stones : [];
       const engineColor = body.engineColor === 2 ? 2 : 1;
@@ -518,7 +524,7 @@ const server = http.createServer(async (req, res) => {
     if (!engine) return sendJson(res, 503, { error: 'no usable Rapfi build was found' });
     try {
       const body = await readJson(req);
-      const size = Math.min(20, Math.max(5, Number(body.size) || 15));
+      const size = boardSize(body.size);
       const rule = RULES[body.rule] != null ? RULES[body.rule] : 0;
       const stones = Array.isArray(body.stones) ? body.stones : [];
       const sideToMove = body.sideToMove === 2 ? 2 : 1;
@@ -538,7 +544,7 @@ const server = http.createServer(async (req, res) => {
     if (!engine) return sendJson(res, 503, { error: 'no usable Rapfi build was found' });
     try {
       const body = await readJson(req);
-      const size = Math.min(20, Math.max(5, Number(body.size) || 15));
+      const size = boardSize(body.size);
       const rule = RULES[body.rule] != null ? RULES[body.rule] : 0;
       const stones = Array.isArray(body.stones) ? body.stones : [];
       const sideToMove = body.sideToMove === 2 ? 2 : 1;
