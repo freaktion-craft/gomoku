@@ -90,7 +90,17 @@ async function think() {
     out(`MESSAGE resistance chosen ${r.chosen.point.x},${r.chosen.point.y} mate ${r.chosen.mate} trap ${r.chosen.trap.toFixed(3)} replaced ${r.replaced ? r.replaced.x + ',' + r.replaced.y : 'none'} probed ${r.probed} forbidden ${r.withForbidden} natural ${r.withForbiddenNatural} ${r.ms}ms`);
   }
   if (src.engine) out(`MESSAGE source ${src.engine}${src.reason ? ' (' + src.reason + ')' : ''}`);
-  if (reply.info && reply.info.eval != null) out(`MESSAGE Depth ${reply.info.depth || 0} | Eval ${reply.info.eval}`);
+  // The search summary in Rapfi's own layout, so match tools (searchstats.js) read speed
+  // and depth from the bridge the same way as from a bare engine.
+  const info = reply.info || {};
+  if (info.eval != null) {
+    const parts = [];
+    if (info.speed) parts.push(`Speed ${info.speed}`);
+    parts.push(`Depth ${info.depth || 0}`, `Eval ${info.eval}`);
+    if (info.nodes) parts.push(`Node ${info.nodes}`);
+    if (info.timeMs != null) parts.push(`Time ${info.timeMs}ms`);
+    out('MESSAGE ' + parts.join(' | '));
+  }
   stones.push([reply.move.x, reply.move.y, engineColor]);
   out(`${reply.move.x},${reply.move.y}`);
 }
