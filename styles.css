@@ -1002,3 +1002,55 @@ select:focus-visible, .btn:focus-visible {
   .movelog { max-height: 132px; }
   .candidates { max-height: 132px; }
 }
+
+/* Spectator window, opened by spectate.bat as index.html?spectate: the board
+   and the hint on it, nothing else. The board takes the whole window, however
+   small it is dragged, so the window can sit in a corner beside the game being
+   watched. */
+:root.spectate .app {
+  flex-direction: row;
+  height: 100vh;
+  min-width: 0;
+  overflow: hidden;
+}
+
+:root.spectate .panel,
+:root.spectate .panel-tab,
+:root.spectate .coach-row { display: none !important; }
+
+:root.spectate .board-pane { padding: 4px; overflow: hidden; }
+
+:root.spectate .board-stack,
+:root.spectate .board-stack.no-eval {
+  --side: max(120px, min(100vw - 8px - var(--spectate-bar), 100vh - 8px));
+}
+
+/* The strip down the right edge for picking your side. Hidden everywhere but
+   the spectator window. */
+.spectate-bar { display: none; }
+
+:root.spectate { --spectate-bar: 62px; }
+
+:root.spectate .spectate-bar {
+  flex: 0 0 var(--spectate-bar);
+  order: 9;                  /* after the board, whatever the narrow layout orders */
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 6px 4px 0;
+}
+
+:root.spectate .spectate-bar .btn {
+  flex: none;
+  padding: 6px 0;
+  font-size: 12px;
+}
+
+:root.spectate .spectate-bar .spectate-undo { margin-top: 12px; }
+
+.spectate-label {
+  font-size: 11px;
+  color: var(--text-dim);
+  text-align: center;
+}

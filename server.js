@@ -7,6 +7,7 @@
  *
  *   POST /api/move    - send a position, get the engine's move back
  *   GET  /api/events  - server-sent events carrying live search output
+ *   POST /api/cursor  - mouse events for the spectator window, relayed as events
  *
  * No dependencies: node server.js
  */
@@ -546,6 +547,23 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, result);
     } catch (err) {
       return sendJson(res, 500, { error: err.message });
+    }
+  }
+
+  /* The spectator window's right-drag cursor. spectate.bat's helper reads the
+     mouse outside the browser and posts what it saw here; the page hears it on
+     the event stream. Events are passed on as they came, in order. */
+  if (url === '/api/cursor' && req.method === 'POST') {
+    try {
+      const body = await readJson(req);
+      const events = Array.isArray(body.events) ? body.events : [];
+      for (const ev of events) {
+        if (!ev || ['down', 'move', 'up'].indexOf(ev.phase) < 0) continue;
+        broadcast('cursor', { phase: ev.phase, x: Number(ev.x) || 0, y: Number(ev.y) || 0 });
+      }
+      return sendJson(res, 200, { ok: true });
+    } catch (err) {
+      return sendJson(res, 400, { error: 'bad cursor events' });
     }
   }
 
