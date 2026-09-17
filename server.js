@@ -17,6 +17,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const { chooseWindow } = require('./window-engine');
 
 const ROOT = __dirname;
 const ENGINE_DIR = path.join(ROOT, 'engine');
@@ -29,6 +30,10 @@ const PORT = Number(process.env.PORT) || 8787;
    on the machine this was measured on; past that the extra threads land on slower
    cores. */
 const THREADS = Math.min(16, Math.max(1, Math.floor(Number(process.env.RAPFI_THREADS)) || 1));
+
+/* How far inside a fake window edge every stone must stay before a 15x15 window may
+   stand in for the 19x19 board (see window-engine.js). WINDOW_MARGIN=N node server.js. */
+const WINDOW_MARGIN = Math.min(7, Math.max(0, Math.floor(Number(process.env.WINDOW_MARGIN)))) || 2;
 
 /* Best instruction set first. A build the CPU cannot run dies immediately with
    an illegal-instruction exit, which is how the vendor suggests detecting it.
@@ -210,13 +215,16 @@ class Rapfi {
     this.send('INFO max_memory ' + 512 * 1024 * 1024);
   }
 
-  /* stones: [[x, y, color], ...] in move order, color 1 = black, 2 = white. */
+  /* stones: [[x, y, color], ...] in move order, color 1 = black, 2 = white.
+     `nodes` caps the search at a node count as well as the clock (0, the default, is
+     no cap). It exists for deterministic tests; normal play leaves it at 0. */
   async think(opts) {
-    const { size, rule, stones, engineColor, timeoutMs, strength } = opts;
+    const { size, rule, stones, engineColor, timeoutMs, strength, nodes = 0 } = opts;
     await this.ensureGame(size, rule);
 
     this.send('INFO timeout_turn ' + timeoutMs);
     this.send('INFO strength ' + strength);
+    this.send('INFO max_node ' + nodes);
 
     const rows = stones.map(s => s[0] + ',' + s[1] + ',' + (s[2] === engineColor ? 1 : 2));
     const command = ['BOARD'].concat(rows, 'DONE').join('\n');
@@ -242,11 +250,12 @@ class Rapfi {
         MESSAGE (rank) <eval> | <depth>-<seldepth> | <pv, starting at the move>
      and finishes by printing the best move, like an ordinary search. */
   async analyze(opts) {
-    const { size, rule, stones, sideToMove, timeoutMs, count } = opts;
+    const { size, rule, stones, sideToMove, timeoutMs, count, nodes = 0 } = opts;
     await this.ensureGame(size, rule);
 
     this.send('INFO timeout_turn ' + timeoutMs);
     this.send('INFO strength 100');
+    this.send('INFO max_node ' + nodes);
 
     const rows = stones.map(s => s[0] + ',' + s[1] + ',' + (s[2] === sideToMove ? 1 : 2));
     this.send(['YXBOARD'].concat(rows, 'DONE').join('\n'));
@@ -310,9 +319,9 @@ class Rapfi {
      Within the window the odds fall off towards the edge, so a level plays
      near-best more often than not and drifts rather than lurching. */
   async choose(opts) {
-    const { size, rule, stones, engineColor, timeoutMs, window: slack } = opts;
+    const { size, rule, stones, engineColor, timeoutMs, window: slack, nodes = 0 } = opts;
     const { best, candidates, info } = await this.analyze({
-      size, rule, stones, sideToMove: engineColor, timeoutMs,
+      size, rule, stones, sideToMove: engineColor, timeoutMs, nodes,
       count: Math.max(2, Math.min(20, Math.round(slack / 60) + 3))
     });
 
@@ -487,7 +496,56 @@ function sendJson(res, code, obj) {
   res.end(body);
 }
 
+/* Two engine processes. `engine` plays every size and rule except 19x19 renju, and serves
+   all analysis (hints, scored options, review, forbidden points) at every size, so
+   evaluations stay on one scale. `windowEngine` only chooses moves for 19x19 renju,
+   inside a 15x15 window where the renju networks apply; it starts on first use. Keeping
+   the move choice on its own process is also what lets it ponder later without analysis
+   requests stopping it. */
 let engine = null;
+let windowEngine = null;
+
+/* The engine's move. Outside 19x19 renju this is the plain search (or the difficulty
+   window's pick). On 19x19 renju the move comes from the 15x15 window when a valid
+   placement exists and its move is legal on the real board; otherwise the 19x19 engine
+   plays it, with a quarter of the turn if the window search already spent the turn.
+   `source` says which engine chose the move and why, for the game log. */
+async function playMove(opts) {
+  const { size, rule, stones, engineColor, timeoutMs, window: slack, nodes, handoverNodes } = opts;
+  // At the top level there is nothing to sample from, so the plain search is both the
+  // right answer and the cheaper way to get it.
+  const pick = (eng, o) => eng.run(() => slack > 0
+    ? eng.choose(Object.assign({ window: slack }, o))
+    : eng.think(Object.assign({ strength: 100 }, o)));
+
+  if (size !== 19 || rule !== RULES.renju) {
+    return pick(engine, { size, rule, stones, engineColor, timeoutMs, nodes });
+  }
+
+  const origin = chooseWindow(stones, WINDOW_MARGIN);
+  let reason = 'no valid window';
+  if (origin) {
+    const local = stones.map(s => [s[0] - origin.ox, s[1] - origin.oy, s[2]]);
+    const result = await pick(windowEngine, { size: 15, rule, stones: local, engineColor, timeoutMs, nodes });
+    const x = result.move.x + origin.ox, y = result.move.y + origin.oy;
+    const occupied = stones.some(s => s[0] === x && s[1] === y);
+    let forbidden = false;
+    if (!occupied && engineColor === 1) {
+      const { points } = await engine.run(() => engine.forbidden({ size, rule, stones, sideToMove: 1 }));
+      forbidden = points.some(p => p.x === x && p.y === y);
+    }
+    if (!occupied && !forbidden) {
+      return { move: { x, y }, info: result.info, source: { engine: 'window', origin, margin: WINDOW_MARGIN } };
+    }
+    reason = occupied ? 'window move on an occupied point' : 'window move forbidden for Black';
+  }
+
+  const budget = !origin ? { timeoutMs, nodes }
+    : handoverNodes > 0 ? { timeoutMs, nodes: handoverNodes }
+    : { timeoutMs: Math.max(30, Math.floor(timeoutMs / 4)), nodes };
+  const result = await pick(engine, Object.assign({ size, rule, stones, engineColor }, budget));
+  return Object.assign(result, { source: { engine: 'handover', reason, origin, margin: WINDOW_MARGIN } });
+}
 let selected = null;
 
 const server = http.createServer(async (req, res) => {
@@ -524,12 +582,13 @@ const server = http.createServer(async (req, res) => {
       const engineColor = body.engineColor === 2 ? 2 : 1;
       const timeoutMs = Math.min(120000, Math.max(50, Number(body.timeoutMs) || 1000));
       const window = Math.min(100000, Math.max(0, Number(body.window) || 0));
+      // Node caps for deterministic tests only (test/window-parity.js); 0 is no cap.
+      const nodes = Math.max(0, Math.floor(Number(body.nodes)) || 0);
+      const handoverNodes = Math.max(0, Math.floor(Number(body.handoverNodes)) || 0);
 
-      /* At the top level there is nothing to sample from, so the plain search
-         is both the right answer and the cheaper way to get it. */
-      const result = await engine.run(() => window > 0
-        ? engine.choose({ size, rule, stones, engineColor, timeoutMs, window })
-        : engine.think({ size, rule, stones, engineColor, timeoutMs, strength: 100 }));
+      const result = await playMove({
+        size, rule, stones, engineColor, timeoutMs, window, nodes, handoverNodes
+      });
       return sendJson(res, 200, result);
     } catch (err) {
       return sendJson(res, 500, { error: err.message });
@@ -591,6 +650,7 @@ const server = http.createServer(async (req, res) => {
 
   if (url === '/api/newgame' && req.method === 'POST') {
     if (engine) await engine.run(() => engine.newGame());
+    if (windowEngine) await windowEngine.run(() => windowEngine.newGame());
     return sendJson(res, 200, { ok: true });
   }
 
@@ -608,6 +668,7 @@ const server = http.createServer(async (req, res) => {
       console.log('  using ' + selected.tag + ' build');
       engine = new Rapfi(selected.tag);
       engine.start();
+      windowEngine = new Rapfi(selected.tag);   // spawned by its first 19x19 renju move
     } else {
       console.log('  no runnable Rapfi build - the UI will fall back to the built-in engine');
     }
@@ -628,6 +689,7 @@ const server = http.createServer(async (req, res) => {
 
 function shutdown() {
   if (engine) engine.stop();
+  if (windowEngine) windowEngine.stop();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);

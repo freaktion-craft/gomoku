@@ -59,6 +59,22 @@ dropping to one thread and back before each `START`.
 port 8791, analyses a position under each rule in turn, and checks that the
 right weight file loads every time.
 
+On a 19x19 renju board the engine plays through a 15x15 window. Rapfi's renju
+networks only cover 15x15, so at 19x19 it would otherwise fall back to its
+weaker classical evaluator. The bridge places a 15x15 window over the stones
+and asks a second Rapfi process, running at 15x15 with the renju networks, for
+the move inside it. The code for this is in `window-engine.js`. It hands the
+move to the 19x19 engine when no window fits or the window's move is illegal
+on the real board. A window only fits while every stone is at least
+`WINDOW_MARGIN` points (default 2) inside its artificial edges, and no line
+crossing those edges carries a live threat. Against plain 19x19 play this
+measured +49 Elo [+31, +68] over 400 games at margin 2. Margin 3 measured
++51 [+13, +90] with twice the handovers, and margin 1 only +27 [-2, +56],
+which is why 2 is the default. Hints, scored options, review and forbidden points
+always come from the 19x19 engine, so evaluations stay on one scale.
+`node test/window-parity.js` checks the bridge move for move against renju19's
+standalone wrapper at fixed node counts.
+
 Opening `index.html` directly as a file also works, but with no bridge there is
 no Rapfi: the page falls back to the small JavaScript engine in
 `local-engine.js`, which is far weaker.
