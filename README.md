@@ -392,10 +392,8 @@ blank, because Rapfi returns no evaluation before the first stone.
 
 Difficulty is a dial from 0 to 100, and a style as much as a strength. The low
 end, "Longer game", plays long games with small mistakes along the way. The high
-end, "Shortest win", plays the shortest way to win. As White in a lost renju
-position it also sets forbidden-point traps (from Strong up). The named levels
-are clickable points on the dial, and each plays exactly as its old menu entry
-did.
+end, "Shortest win", plays the shortest way to win. The named levels are
+clickable points on the dial, and each plays exactly as its old menu entry did.
 
 The dial is built two different ways, because one way does not reach the bottom
 of it.
@@ -413,8 +411,8 @@ the think time are interpolated, so turning the dial up never makes it weaker.
 | 20 | Casual | perception table | 0.3 s |
 | 30 | | window 2500 | 0.5 s |
 | 60 | Club | window 400 | 0.5 s |
-| 80 | Strong | window 100, forbidden-point traps as White | 0.8 s |
-| 100 | Full | window 0, always the best move, traps as White | 1.5 s |
+| 80 | Strong | window 100 | 0.8 s |
+| 100 | Full | window 0, always the best move | 1.5 s |
 
 The window cannot throw a decided position away, which is what keeps the
 mistakes non-critical: when a four has to be blocked, every other reply is worse

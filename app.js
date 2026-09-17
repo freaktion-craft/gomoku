@@ -306,8 +306,7 @@
 
   /* The dial runs from 0 to 100 and is also a style axis. The low end plays longer
      games full of small, non-critical mistakes; the high end plays the shortest way to
-     win, and as White in a lost renju position sets forbidden-point traps
-     (white-resistance.js on the bridge). The named levels are points on it.
+     win. The named levels are points on it.
 
      From 30 up it is Rapfi with a `window`: how far below its own best move, in eval
      units, the move it plays may be. Between the named points the window and the move
@@ -336,8 +335,9 @@
 
   var TICKS = { beginner: 0, casual: 20, club: 60, strong: 80, full: 100 };
 
-  // The trap policy is part of the ruthless end of the style.
-  var RESIST_FROM = TICKS.strong;
+  /* White's forbidden-point trap policy (white-resistance.js) is off on every setting:
+     against a weaker Black it never won a game by a trap, and White won less with it on
+     (18.4% against 27.3% of games as White). Move requests say so explicitly. */
 
   function levelAt(value) {
     var v = Math.max(0, Math.min(100, Math.round(Number(value))));
@@ -358,7 +358,7 @@
       window: Math.round(a[1] + f * (b[1] - a[1])),
       timeoutMs: Math.round(a[2] + f * (b[2] - a[2])),
       depth: Math.round(a[3] + f * (b[3] - a[3])),
-      resist: v >= RESIST_FROM
+      resist: false
     };
   }
 
@@ -372,8 +372,8 @@
     beginner: 'Answers a four, but walks straight past an open three.',
     casual:   'Answers a four, and spots about half the open threes.',
     club:     'Answers everything, and takes the second-best line often enough.',
-    strong:   'Answers everything, is rarely off the best move, and sets forbidden-point traps when lost as White.',
-    full:     'Plays the shortest way to win, and sets forbidden-point traps when lost as White.'
+    strong:   'Answers everything, and is rarely off the best move.',
+    full:     'Plays the shortest way to win.'
   };
 
   function difficultyNote(value) {
@@ -382,7 +382,7 @@
     if (level.sees && value >= TICKS.casual) return DIFFICULTY_NOTE.casual;
     if (level.sees) return 'Answers a four, and spots some of the open threes: more of them towards Casual.';
     return 'Answers everything, and settles for a move up to ' + level.window +
-      ' below its best' + (level.resist ? '; sets forbidden-point traps when lost as White.' : '.');
+      ' below its best.';
   }
 
   var ANALYSIS_MS = 1000;

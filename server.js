@@ -562,12 +562,13 @@ const rankedPoints = r => r.candidates
    window's pick). On 19x19 renju the move comes from the 15x15 window when a valid
    placement exists and its move is legal on the real board; otherwise the 19x19 engine
    plays it, with a quarter of the turn if the window search already spent the turn.
-   In renju, when that move leaves White mated by force, White's resistance policy may
-   swap it for the losing move that sets Black the best forbidden-point trap (`resist:
-   false` turns that off). `source` says which engine chose the move and why, for the
-   game log. */
+   White's forbidden-point trap policy (white-resistance.js) runs only when a request
+   asks for it with `resist: true`; nothing in the app does. Measured against a weaker
+   Black it never won a game by a trap and White won less with it on, so it is off, and
+   with it off none of its searches run and its probe engine never starts. `source` says
+   which engine chose the move and why, for the game log. */
 async function playMove(opts) {
-  const { size, rule, stones, engineColor, timeoutMs, window: slack, nodes, handoverNodes, resist: resistOn = true, probeNodes } = opts;
+  const { size, rule, stones, engineColor, timeoutMs, window: slack, nodes, handoverNodes, resist: resistOn = false, probeNodes } = opts;
   // At the top level there is nothing to sample from, so the plain search is both the
   // right answer and the cheaper way to get it.
   const pick = (eng, o) => eng.run(() => slack > 0
@@ -663,7 +664,7 @@ const server = http.createServer(async (req, res) => {
       const nodes = Math.max(0, Math.floor(Number(body.nodes)) || 0);
       const handoverNodes = Math.max(0, Math.floor(Number(body.handoverNodes)) || 0);
       const probeNodes = Math.max(0, Math.floor(Number(body.probeNodes)) || 0);
-      const resistOn = body.resist !== false;
+      const resistOn = body.resist === true;
 
       const result = await playMove({
         size, rule, stones, engineColor, timeoutMs, window, nodes, handoverNodes, resist: resistOn, probeNodes
