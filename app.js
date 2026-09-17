@@ -55,7 +55,7 @@
    'tabMoves', 'tabHistory', 'history', 'gameList', 'historyClear',
    'movesFoot', 'exportGame', 'exportReplay', 'reviewGame', 'reviewSummary', 'replayNote',
    'replay', 'replayTitle', 'replayLog', 'replayStart', 'replayPrev',
-   'replayNext', 'replayEnd', 'replayClose'].forEach(function (id) {
+   'replayNext', 'replayEnd', 'replayClose', 'spectateBar', 'spectateUndo'].forEach(function (id) {
     els[id] = document.getElementById(id);
   });
 
@@ -165,7 +165,13 @@
      coordinates underneath. Escape flips it either way, without going near the
      control, which is the point of having it. */
 
-  var PLAIN_TITLE = document.title;
+  /* index.html?spectate is the always-on-top window spectate.bat opens: the
+     board alone, fixed in tactics mode with the hint on, for entering the moves
+     of a game being watched elsewhere. spectate.bat finds the window by title. */
+  var SPECTATE = /[?&]spectate(?:[=&]|$)/.test(location.search);
+  var SPECTATE_TITLE = 'Gomoku spectator';
+
+  var PLAIN_TITLE = SPECTATE ? SPECTATE_TITLE : document.title;
 
   var WORDS = {
     classic: {
@@ -817,6 +823,8 @@
     if (last != null && !state.winLine) markLast(last);
 
     if (state.winLine && state.winLine.length) markWin(state.winLine);
+
+    drawCursor();
 
     // Last, so the winning line does not strike through the numbers. The sheet
     // writes the move number into the cell itself, so it needs no second pass.
@@ -1656,7 +1664,7 @@
   function requestAnalysis() {
     // Tactics mode analyses even when the option list is switched off.
     if (isReplaying()) { clearCandidates(); return; }    // the replay owns the board
-    var count = Number(els.nbest.value) || (isCoach() ? 5 : 0)
+    var count = Number(els.nbest.value) || (isCoach() && !SPECTATE ? 5 : 0)
                 || (state.hintOn || state.evalBarOn ? 1 : 0);
     if (!count || backend.kind !== 'rapfi' || state.over || !isHumanTurn()) {
       clearCandidates();
@@ -1704,7 +1712,7 @@
       state.candPending = false;
       if (state.hintOn && list.length) state.hint = list[0].cell;
       // If only the hint asked for this search, do not paint the option list.
-      if (!Number(els.nbest.value) && !isCoach()) state.candidates = [];
+      if (!Number(els.nbest.value) && (!isCoach() || SPECTATE)) state.candidates = [];
       render();
     }).catch(function () {
       if (seq !== state.candSeq) return;
@@ -2186,12 +2194,130 @@
     return info;
   }
 
+  /* ---- right-drag cursor -------------------------------------------------
+     Holding the right button over the board shows a cross under the pointer
+     that snaps to the nearest point. Letting go over the board plays there;
+     letting go off the board plays nothing.
+
+     In the spectator window the game being watched usually has the focus, so
+     the page cannot see the mouse. spectate.bat's helper reads it instead and
+     relays where the pointer is on screen, in physical pixels, as the right
+     button goes down, while it is held and as it comes up. The page turns that
+     into its own coordinates, so a drag behaves the same whichever window has
+     the focus. A press that does not start over the board belongs to the other
+     program and is ignored. */
+
+  var cursor = { active: false, local: false, off: false, x: 0, y: 0, muteUntil: 0 };
+
+  /* Where the page's viewport sits on screen, relative to the window's own
+     position. Measured from any real mouse event over the page; until there
+     has been one it is estimated from the size of the window frame. */
+  var viewportOffset = null;
+
+  function clientFromScreen(px, py) {
+    var dpr = window.devicePixelRatio || 1;
+    var frame = (window.outerWidth - window.innerWidth) / 2;
+    var off = viewportOffset || { x: frame, y: window.outerHeight - window.innerHeight - frame };
+    return { x: px / dpr - window.screenX - off.x, y: py / dpr - window.screenY - off.y };
+  }
+
+  function overBoard(clientX, clientY) {
+    var r = canvas.getBoundingClientRect();
+    return clientX >= r.left && clientX <= r.right && clientY >= r.top && clientY <= r.bottom;
+  }
+
+  function cursorCell() {
+    var m = state.metrics;
+    var col = Math.max(0, Math.min(SIZE - 1, Math.round((cursor.x - m.pad) / m.step)));
+    var row = Math.max(0, Math.min(SIZE - 1, Math.round((cursor.y - m.pad) / m.step)));
+    return row * SIZE + col;
+  }
+
+  function dragCursor(clientX, clientY) {
+    if (!cursor.active) return;
+    var r = canvas.getBoundingClientRect();
+    cursor.x = clientX - r.left;
+    cursor.y = clientY - r.top;
+    cursor.off = !overBoard(clientX, clientY);
+    state.hover = cursor.off ? -1 : cursorCell();
+    draw();
+  }
+
+  function pressCursor(clientX, clientY, local) {
+    if (!state.metrics || !overBoard(clientX, clientY)) return false;
+    cursor.active = true;
+    cursor.local = local;
+    dragCursor(clientX, clientY);
+    return true;
+  }
+
+  function releaseCursor(clientX, clientY) {
+    if (!cursor.active) return;
+    dragCursor(clientX, clientY);
+    var off = cursor.off;
+    cursor.active = false;
+    cursor.local = false;
+    state.hover = -1;
+    if (!off && isHumanTurn() && !state.over && !isReplaying() && play(cursorCell())) {
+      settle();
+      return;
+    }
+    draw();
+  }
+
+  function remoteCursor(ev) {
+    if (!ev) return;
+    // A right-drag over this window reaches the page directly as well as
+    // through the helper, and the relayed copy arrives later. The page's own
+    // events win, so the copy is dropped until it has had time to catch up.
+    if (cursor.local || Date.now() < cursor.muteUntil) return;
+    var p = clientFromScreen(Number(ev.x), Number(ev.y));
+    if (!Number.isFinite(p.x) || !Number.isFinite(p.y)) return;
+    if (ev.phase === 'down') pressCursor(p.x, p.y, false);
+    else if (ev.phase === 'move') dragCursor(p.x, p.y);
+    else if (ev.phase === 'up') releaseCursor(p.x, p.y);
+  }
+
+  if (SPECTATE) {
+    window.addEventListener('mousemove', function (e) {
+      viewportOffset = {
+        x: e.screenX - e.clientX - window.screenX,
+        y: e.screenY - e.clientY - window.screenY
+      };
+      if (cursor.local) dragCursor(e.clientX, e.clientY);
+    });
+    canvas.addEventListener('mousedown', function (e) {
+      if (e.button !== 2) return;
+      e.preventDefault();
+      pressCursor(e.clientX, e.clientY, true);
+    });
+    window.addEventListener('mouseup', function (e) {
+      if (e.button !== 2 || !cursor.local) return;
+      cursor.muteUntil = Date.now() + 600;
+      releaseCursor(e.clientX, e.clientY);
+    });
+  }
+
+  function drawCursor() {
+    if (!cursor.active || cursor.off) return;
+    var r = state.metrics.step * 0.18;
+    ctx.save();
+    ctx.strokeStyle = COLOR.win;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(cursor.x - r, cursor.y); ctx.lineTo(cursor.x + r, cursor.y);
+    ctx.moveTo(cursor.x, cursor.y - r); ctx.lineTo(cursor.x, cursor.y + r);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   function openEventStream() {
     if (!window.EventSource) return;
     var es = new EventSource('api/events');
     es.onmessage = function (ev) {
       var msg;
       try { msg = JSON.parse(ev.data); } catch (e) { return; }
+      if (msg.kind === 'cursor') { if (SPECTATE) remoteCursor(msg.text); return; }
       if (msg.kind !== 'line') return;
       var info = parseMessage(msg.text);
       if (info) showAnalysis(info);
@@ -2532,6 +2658,15 @@
     renderReview();
 
     canvas.classList.toggle('locked', state.over || isReplaying() || !isHumanTurn());
+
+    if (SPECTATE) {
+      var sides = els.spectateBar.querySelectorAll('button[data-mode]');
+      for (var s = 0; s < sides.length; s++) {
+        sides[s].setAttribute('aria-pressed', sides[s].getAttribute('data-mode') === els.mode.value ? 'true' : 'false');
+        sides[s].disabled = state.thinking;
+      }
+      els.spectateUndo.disabled = els.undo.disabled;
+    }
   }
 
   function titleCase(text) {
@@ -2594,13 +2729,19 @@
   /* ---- events ------------------------------------------------------------ */
 
   canvas.addEventListener('mousemove', function (e) {
+    if (cursor.active) return;
     var cell = cellFromPoint(e.clientX, e.clientY);
     if (cell !== state.hover) { state.hover = cell; draw(); }
   });
 
   canvas.addEventListener('mouseleave', function () {
+    if (cursor.active) return;           // the right-drag cursor owns the hover
     if (state.hover !== -1) { state.hover = -1; draw(); }
   });
+
+  // A right-drag over the spectator window drives the cursor, so the browser's
+  // menu must not open on top of it.
+  if (SPECTATE) document.addEventListener('contextmenu', function (e) { e.preventDefault(); });
 
   canvas.addEventListener('click', function (e) {
     if (!isHumanTurn() || state.over || isReplaying()) return;
@@ -2631,6 +2772,20 @@
   els.undoAll.addEventListener('touchcancel', cancelHold);
   els.undoAll.addEventListener('click', function (e) { e.preventDefault(); });
   els.mode.addEventListener('change', newGame);
+
+  /* Spectator window: picking a side hands the other one to the engine without
+     clearing the board, so it can be changed partway through a game. If it is
+     now the engine's turn, it moves straight away. */
+  els.spectateUndo.addEventListener('click', undo);
+
+  els.spectateBar.addEventListener('click', function (e) {
+    var btn = e.target.closest ? e.target.closest('button[data-mode]') : null;
+    if (!btn || state.thinking || btn.getAttribute('data-mode') === els.mode.value) return;
+    els.mode.value = btn.getAttribute('data-mode');
+    state.hint = -1;
+    render();
+    settle();
+  });
 
   els.demoPlay.addEventListener('click', function () { setDemoPaused(!state.demoPaused); });
   els.demoStep.addEventListener('click', demoStep);
@@ -2867,6 +3022,16 @@
   state.panelOpen = recall(PANEL_KEY) !== 'closed';
   state.leftOpen = recall(LEFT_KEY) !== 'closed';
   applyPanelState();
+  if (SPECTATE) {
+    // Set for this window only: nothing here is stored, so the normal board
+    // keeps its own settings.
+    document.documentElement.classList.add('spectate');
+    els.mode.value = 'coach';
+    els.nbest.value = '0';
+    state.hintOn = true;
+    state.evalBarOn = false;
+    state.valueMapOn = false;
+  }
   setBackend(backend);
   clearAnalysis();
   resize();

@@ -596,6 +596,54 @@ The panel keeps its full width, and under 760px wide it moves below the board.
 Past the floor the page scrolls rather than squeezing everything into nothing,
 so dragging the window around cannot leave it in an unusable state.
 
+## Spectator window
+
+`spectate.bat` opens the board on its own in a small Chrome app window that
+stays on top of other windows, for following a game being played somewhere
+else. It starts the bridge in a minimised window if it is not already running,
+then loads `index.html?spectate`: tactics mode, hint on, no panels, no
+coaching cards and no evaluation bar, with the board filling the window however
+small it is dragged. Nothing it sets is stored, so the normal board keeps its
+own settings. Place the stones for both sides as they are played; U undoes,
+N starts a new game and H turns the hint off and on.
+
+A strip down the right edge picks your side. **Both** is the tactics mode
+above. **Black** or **White** hands the other colour to the engine, which moves
+at once if it is already its turn. Switching does not clear the board, so it can
+change partway through a game. **Undo** below them does what U does. Against
+the engine it takes back its reply as well, so it is your turn again.
+
+The board can also be played by right-dragging, and this works the same
+whether or not the window has the focus, so there is no need to click away
+from the game you are watching. Hold the right button over the board and a red
+cross appears under the pointer, snapping to the nearest point. Let go over the
+board and a stone is played there. Let go off the board and nothing is played.
+A right press that does not start over the board is left alone, so right clicks
+in the other program are unaffected. That program still receives the drag as
+well.
+
+The page cannot see the mouse while another program has the focus, so the
+watcher registers a hidden window for raw mouse input, which still arrives in
+the background. On each button change, and about every 20ms while the button is
+held, it posts the pointer's screen position in physical pixels to
+`/api/cursor`. The bridge relays that to the page on its event stream, and the
+page converts it to its own coordinates. To do that, the page learns where its
+viewport sits on screen from the first real mouse event over the window, and
+estimates it from the window frame until then. When the window itself has the
+focus, the page takes the drag straight from its own mouse events and ignores
+the relayed copy, which arrives a moment later. Games that lock and hide the
+pointer while the camera turns leave it in one place, so the cross stays put
+too.
+
+The window runs under its own Chrome profile in
+`%LocalAppData%\RapfiGomoku\spectator`, so it is a separate process from your
+own browser. Chrome has no always-on-top switch, so a hidden PowerShell watcher
+at the end of the batch file sets the flag through `SetWindowPos`. Chrome only
+keeps that flag when its window has focus as it is set, so the watcher brings
+the window forward once and pins it again whenever it has focus and has lost the
+flag. The watcher quits when the window closes. A game running in exclusive
+fullscreen still covers it; borderless windowed does not.
+
 ## Licensing
 
 Rapfi is by dhbloo and is licensed GPL-3.0. It is not included here; 

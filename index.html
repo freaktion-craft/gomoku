@@ -226,6 +226,13 @@
     </footer>
     </details>
   </aside>
+  <nav class="spectate-bar" id="spectateBar" aria-label="Which side you play">
+    <span class="spectate-label">You</span>
+    <button class="btn btn-toggle" data-mode="coach" title="You place both sides, the engine only hints">Both</button>
+    <button class="btn btn-toggle" data-mode="ai-white" title="You play Black, the engine answers as White">Black</button>
+    <button class="btn btn-toggle" data-mode="ai-black" title="You play White, the engine answers as Black">White</button>
+    <button class="btn spectate-undo" id="spectateUndo" title="Take back the last move (U)">Undo</button>
+  </nav>
   <button id="leftTab" class="panel-tab left" title="Show the move list">Moves</button>
   <button id="panelTab" class="panel-tab" title="Show the panel">Panel</button>
 </div>
