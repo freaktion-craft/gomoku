@@ -48,8 +48,20 @@ Or run `node server.js` yourself and open <http://127.0.0.1:8787>. Use
 only, so nothing is exposed to the network.
 
 `RAPFI_THREADS=N node server.js` sets how many search threads Rapfi uses, from 1
-(the default) to 16. More threads search deeper, but they take CPU from
-everything else running on the machine.
+to 16 (default 8). More threads search deeper, but they take CPU from
+everything else running on the machine, so drop it to 4 or less while playing
+something heavy alongside. The default comes from measuring renju at 1.5 s a
+move on an i7-13700K:
+
+| Threads | Nodes/s vs 1 thread | Match |
+|---|---|---|
+| 4 | x3.95 | +119 Elo [+64, +181] against 1 thread, 100 games |
+| 8 | x7.44 | +47 Elo [-68, +173] against 4 threads, 30 games |
+| 12 | x9.49 | not played |
+| 16 | x10.49 | not played |
+
+Past 8 threads the extra threads are hyperthreads on cores that are already
+busy. Each doubling there adds 41% more nodes, against 88% from 4 to 8.
 
 Rapfi 0.43.01 has a bug with two or more threads: after a rule change in the
 same process it keeps searching with the first rule's network, so a renju game

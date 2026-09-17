@@ -26,10 +26,11 @@ const PORT = Number(process.env.PORT) || 8787;
 
 /* Search threads per engine process: RAPFI_THREADS=N node server.js. More threads
    search deeper but take CPU from anything else running, VRChat included, so the
-   count is a setting rather than every core. Capped at 16, the P-core thread count
-   on the machine this was measured on; past that the extra threads land on slower
-   cores. */
-const THREADS = Math.min(16, Math.max(1, Math.floor(Number(process.env.RAPFI_THREADS)) || 1));
+   count is a setting rather than every core; set it to 4 or less while playing
+   something heavy. The default of 8 is one thread per performance core on an
+   i7-13700K: nodes per second went x3.95 at 4 threads and x7.44 at 8, but only
+   x10.5 at 16, where the extra threads are hyperthreads. Capped at 16. */
+const THREADS = Math.min(16, Math.max(1, Math.floor(Number(process.env.RAPFI_THREADS)) || 8));
 
 /* How far inside a fake window edge every stone must stay before a 15x15 window may
    stand in for the 19x19 board (see window-engine.js). WINDOW_MARGIN=N node server.js. */
