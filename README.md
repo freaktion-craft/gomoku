@@ -47,6 +47,18 @@ Or run `node server.js` yourself and open <http://127.0.0.1:8787>. Use
 `PORT=9000 node server.js` for a different port. The server binds to `127.0.0.1`
 only, so nothing is exposed to the network.
 
+`RAPFI_THREADS=N node server.js` sets how many search threads Rapfi uses, from 1
+(the default) to 16. More threads search deeper, but they take CPU from
+everything else running on the machine.
+
+Rapfi 0.43.01 has a bug with two or more threads: after a rule change in the
+same process it keeps searching with the first rule's network, so a renju game
+after a freestyle one would use the freestyle net. The bridge works around it by
+dropping to one thread and back before each `START`.
+`node test/rule-switch.js` checks this. It starts the bridge with two threads on
+port 8791, analyses a position under each rule in turn, and checks that the
+right weight file loads every time.
+
 Opening `index.html` directly as a file also works, but with no bridge there is
 no Rapfi: the page falls back to the small JavaScript engine in
 `local-engine.js`, which is far weaker.

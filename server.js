@@ -23,6 +23,13 @@ const ENGINE_DIR = path.join(ROOT, 'engine');
 const CACHE_FILE = path.join(ENGINE_DIR, 'selected-build.json');
 const PORT = Number(process.env.PORT) || 8787;
 
+/* Search threads per engine process: RAPFI_THREADS=N node server.js. More threads
+   search deeper but take CPU from anything else running, VRChat included, so the
+   count is a setting rather than every core. Capped at 16, the P-core thread count
+   on the machine this was measured on; past that the extra threads land on slower
+   cores. */
+const THREADS = Math.min(16, Math.max(1, Math.floor(Number(process.env.RAPFI_THREADS)) || 1));
+
 /* Best instruction set first. A build the CPU cannot run dies immediately with
    an illegal-instruction exit, which is how the vendor suggests detecting it.
    The macOS release is a single Apple Silicon binary, so there is nothing to
@@ -182,13 +189,22 @@ class Rapfi {
     return next;
   }
 
+  /* Rapfi 0.43.01 with two or more threads keeps the network of the first rule it
+     loaded when the rule changes in the same process, so a renju game after a
+     freestyle one would quietly search with the freestyle net. Dropping to one
+     thread and back after the new rule, before START, makes it load the right
+     weights (fixed upstream in Rapfi 613f25c, not yet released). START also
+     rebuilds the search tables that depend on the thread count, which is why the
+     thread count always goes out before it. Regression test: test/rule-switch.js. */
   async ensureGame(size, rule) {
     this.start();
     if (this.size === size && this.rule === rule) return;
+    this.send('INFO rule ' + rule);
+    if (THREADS > 1) this.send('INFO THREAD_NUM 1');
+    this.send('INFO THREAD_NUM ' + THREADS);
     await this.ask('START ' + size, l => /^OK\b/i.test(l) || undefined, 15000);
     this.size = size;
     this.rule = rule;
-    this.send('INFO rule ' + rule);
     this.send('INFO game_type 0');       // opponent is a human
     this.send('INFO timeout_match 0');   // no whole-game clock
     this.send('INFO max_memory ' + 512 * 1024 * 1024);
