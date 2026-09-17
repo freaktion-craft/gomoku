@@ -574,6 +574,23 @@ something together with it.
 `coord` is always gomoku notation and `grade` is always the plain name: the file
 is a record, not a screenshot.
 
+## Game log
+
+Every finished game is also kept by the bridge, whether or not it is ever
+exported. When a game ends, the page posts its record, in the same shape as
+Export JSON, to `/api/log`. The bridge appends it as one line to
+`data/games/<yyyy-mm-dd>.jsonl`. Each line starts with an `id`: the UTC time the
+game was saved plus a hash of the board size, rule and moves, for example
+`20260917T095125Z-98066e4385`. The same game posted twice is recognised and not
+written again. Lines are only ever appended, so the files can be read while the
+bridge runs.
+
+It is on by default. `GAME_LOG=0 node server.js` turns it off, and
+`GAME_LOG_DIR=<folder>` writes somewhere other than `data/games`, which git
+ignores. Games played with the page opened as a plain file, without the bridge,
+are not logged. `node test/game-log.js` checks the log: logging, duplicates, ids,
+refusal of malformed records and switching it off.
+
 ## Value map
 
 The **Value map** switch puts a dot on every empty point that is worth

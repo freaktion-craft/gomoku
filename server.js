@@ -17,6 +17,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const { windowedMove } = require('./window-engine');
 const { resistWithin } = require('./white-resistance');
 
@@ -36,6 +37,33 @@ const THREADS = Math.min(16, Math.max(1, Math.floor(Number(process.env.RAPFI_THR
 /* How far inside a fake window edge every stone must stay before a 15x15 window may
    stand in for the 19x19 board (see window-engine.js). WINDOW_MARGIN=N node server.js. */
 const WINDOW_MARGIN = Math.min(7, Math.max(0, Math.floor(Number(process.env.WINDOW_MARGIN)))) || 2;
+
+/* Every finished game is kept, by default, as one JSON line in a file per day: the record
+   the app's Export JSON writes, plus a stable id. GAME_LOG=0 turns it off; GAME_LOG_DIR
+   puts the files somewhere other than data/games (which git ignores). */
+const GAME_LOG = process.env.GAME_LOG !== '0';
+const GAME_LOG_DIR = process.env.GAME_LOG_DIR || path.join(ROOT, 'data', 'games');
+
+/* The id is when the game was saved plus a hash of what was played, so the same game
+   posted twice is recognised and two different games never share one. */
+function gameId(record) {
+  const at = new Date(record.savedAt || Date.now());
+  const stamp = (isNaN(at.getTime()) ? new Date() : at).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const played = [record.size, record.rule].concat(record.moves.map(m => m.x + ',' + m.y)).join(' ');
+  return stamp + '-' + crypto.createHash('sha1').update(played).digest('hex').slice(0, 10);
+}
+
+function logGame(record) {
+  const id = gameId(record);
+  const day = id.slice(0, 4) + '-' + id.slice(4, 6) + '-' + id.slice(6, 8);
+  const file = path.join(GAME_LOG_DIR, day + '.jsonl');
+  fs.mkdirSync(GAME_LOG_DIR, { recursive: true });
+  let existing = '';
+  try { existing = fs.readFileSync(file, 'utf8'); } catch (e) { /* first game of the day */ }
+  if (existing.includes('"id":"' + id + '"')) return { id, file, duplicate: true };
+  fs.appendFileSync(file, JSON.stringify(Object.assign({ id }, record)) + '\n');
+  return { id, file, duplicate: false };
+}
 
 /* Best instruction set first. A build the CPU cannot run dies immediately with
    an illegal-instruction exit, which is how the vendor suggests detecting it.
@@ -696,6 +724,22 @@ const server = http.createServer(async (req, res) => {
       return sendJson(res, 200, { ok: true });
     } catch (err) {
       return sendJson(res, 400, { error: 'bad cursor events' });
+    }
+  }
+
+  /* A finished game from the app, in its Export JSON shape, for the game log. */
+  if (url === '/api/log' && req.method === 'POST') {
+    if (!GAME_LOG) return sendJson(res, 200, { logged: false, reason: 'GAME_LOG=0' });
+    try {
+      const record = await readJson(req);
+      const valid = record && Array.isArray(record.moves) && record.moves.length <= 400 &&
+        (record.size === 15 || record.size === 19) && typeof record.rule === 'string' &&
+        record.moves.every(m => m && Number.isInteger(m.x) && Number.isInteger(m.y));
+      if (!valid) return sendJson(res, 400, { error: 'not a game record' });
+      const result = logGame(record);
+      return sendJson(res, 200, { logged: !result.duplicate, id: result.id, duplicate: result.duplicate });
+    } catch (err) {
+      return sendJson(res, 500, { error: err.message });
     }
   }
 

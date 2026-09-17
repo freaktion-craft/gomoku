@@ -5,3 +5,6 @@ engine/
 *.log
 Thumbs.db
 .DS_Store
+
+# The bridge logs every finished game here (GAME_LOG_DIR to move it, GAME_LOG=0 to stop).
+data/

@@ -1096,6 +1096,15 @@
     });
     if (state.games.length > HISTORY_MAX) state.games.length = HISTORY_MAX;
     saveGames();
+
+    // The bridge keeps every finished game in its game log, whatever History later drops.
+    if (backend.kind === 'rapfi') {
+      fetch('api/log', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(liveRecord())
+      }).catch(function () { /* the log is best effort; History still has the game */ });
+    }
   }
 
   function resultText(game) {
