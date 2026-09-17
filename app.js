@@ -21,14 +21,7 @@
     white: '--stone-white',
     whiteEdge: '--stone-white-edge',
     hint: '--marker',
-    win: '--win',
-    sheetHeader: '--sheet-header',
-    sheetPos: '--sheet-pos',
-    sheetNeg: '--sheet-neg',
-    sheetActive: '--sheet-active',
-    sheetHover: '--sheet-hover',
-    sheetHeat: '--sheet-heat',
-    sheetSelect: '--sheet-select'
+    win: '--win'
   };
 
   function refreshColors() {
@@ -50,7 +43,7 @@
    'prevMove', 'prevShape', 'curMove', 'curShape', 'coachPrev',
    'boardStack', 'evalBar', 'evalFill', 'evalNumWhite', 'evalNumBlack',
    'evalBarToggle', 'panelToggle', 'panelTab', 'panelLeft', 'leftToggle', 'leftTab',
-   'skin', 'favicon', 'demoControls', 'demoMatch', 'demoNote', 'demoPace',
+   'demoControls', 'demoMatch', 'demoNote', 'demoPace',
    'demoPlay', 'demoStep', 'demoStopOnError', 'engineFold', 'keysFold',
    'tabMoves', 'tabHistory', 'history', 'gameList', 'historyClear',
    'movesFoot', 'exportGame', 'exportReplay', 'reviewGame', 'reviewSummary', 'replayNote',
@@ -91,7 +84,6 @@
     whiteRate: null,    // white's share of the win chance, 0 to 1
     panelOpen: true,
     leftOpen: true,
-    skin: 'classic',    // 'sheet' disguises the whole page as a spreadsheet
     demoPaused: false,  // sparring: the game is held, waiting to be stepped on
     stoppedAt: -1,      // and the ply it was held on, so it holds there once
     metrics: null
@@ -155,147 +147,14 @@
   }
 
 
-  /* ---- skins --------------------------------------------------------------
-     The board skin also renames everything on the page, because a disguised
-     board beside a panel reading "Black to move" fools nobody. Fixed strings
-     carry their replacement in a data-sheet attribute in the HTML, next to the
-     words they stand in for; anything render() rewrites is looked up here.
-
-     Nothing about the game changes - the same engine, the same rules, the same
-     coordinates underneath. Escape flips it either way, without going near the
-     control, which is the point of having it. */
-
   /* index.html?spectate is the always-on-top window spectate.bat opens: the
      board alone, fixed in tactics mode with the hint on, for entering the moves
      of a game being watched elsewhere. spectate.bat finds the window by title. */
   var SPECTATE = /[?&]spectate(?:[=&]|$)/.test(location.search);
   var SPECTATE_TITLE = 'Gomoku spectator';
 
-  var PLAIN_TITLE = SPECTATE ? SPECTATE_TITLE : document.title;
-
-  var WORDS = {
-    classic: {
-      title: PLAIN_TITLE,
-      black: 'Black', white: 'White',
-      toMove: ' to move', wins: ' wins', draw: 'Draw',
-      unit: 'Move', thinking: 'Engine is thinking', analysing: 'Analysing',
-      hintOn: 'Hint on', hintOff: 'Hint off',
-      mapOn: 'Value map on', mapOff: 'Value map off',
-      barOn: 'Evaluation bar on', barOff: 'Evaluation bar off',
-      clear: 'Undo all', clearList: 'Clear history', clearSure: 'Clear all · sure?',
-      replay: 'Replay · ',
-      review: 'Review', reviewing: 'Reviewing',
-      wouldMake: ' would have made ', wasForcedWin: ' was a forced win',
-      accuracy: 'accuracy', turning: 'Turning point', missed: 'Missed wins',
-      winChance: 'win chance'
-    },
-    sheet: {
-      title: 'Q3_forecast_v7.xlsx',
-      badge: 'linked · autosaved',
-      black: 'Actual', white: 'Budget',
-      toMove: ' to enter', wins: ' reconciled', draw: 'Sheet full',
-      unit: 'Edit', thinking: 'Recalculating', analysing: 'Recalculating',
-      hintOn: 'Suggest on', hintOff: 'Suggest off',
-      mapOn: 'Heatmap on', mapOff: 'Heatmap off',
-      barOn: 'Variance bar on', barOff: 'Variance bar off',
-      clear: 'Clear sheet', clearList: 'Clear versions', clearSure: 'Clear all · sure?',
-      replay: 'Version · ',
-      review: 'Audit', reviewing: 'Auditing',
-      wouldMake: ' would have made ', wasForcedWin: ' would have closed the target',
-      accuracy: 'accuracy', turning: 'Largest variance', missed: 'Missed targets',
-      winChance: 'on target'
-    }
-  };
-
-  /* The vocabulary of threats has no place on a sheet, so each shape gets a
-     reading of the figures that says the same thing about the position. */
-  var SHEET_SHAPE = {
-    'five in a row':  { name: 'target met',           note: 'the sheet is closed' },
-    'open four':      { name: 'two paths to target',  note: 'both remain open, so it cannot be offset' },
-    'double four':    { name: 'two paths to target',  note: 'only one of the two can be offset' },
-    'four-three':     { name: 'compound driver',      note: 'the first must be answered, then the second lands' },
-    'double three':   { name: 'two drivers',          note: 'only one of the two can be answered' },
-    'four':           { name: 'one step from target', note: 'forces an entry on the closing cell' },
-    'open three':     { name: 'trending to target',   note: 'reaches two paths unless it is offset' },
-    'closed three':   { name: 'trend capped',         note: 'blocked one side, not yet forcing' },
-    'open two':       { name: 'early trend',          note: 'quiet build towards a driver' },
-    'quiet move':     { name: 'no movement',          note: 'no variance yet' }
-  };
-
-  var SHEET_GRADE = {
-    Best: 'Optimal', Good: 'On plan', Inaccuracy: 'Minor variance',
-    Mistake: 'Variance', Blunder: 'Material variance'
-  };
-
-  var SHEET_PHASE = { opening: 'draft', 'middle game': 'in progress', attack: 'variance', finished: 'closed' };
-
-  /* Tab icons. Data URIs rather than files, so a skin is still one stylesheet
-     and one script. */
-  var ICONS = {
-    classic: 'data:image/svg+xml,' + encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">' +
-      '<rect width="16" height="16" rx="2" fill="%23e6e4df"/>' +
-      '<circle cx="8" cy="8" r="4.5" fill="%2317171a"/></svg>'),
-    sheet: 'data:image/svg+xml,' + encodeURIComponent(
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">' +
-      '<rect width="16" height="16" rx="2" fill="%23107c41"/>' +
-      '<g stroke="%23ffffff" stroke-width="1.1">' +
-      '<path d="M2 6h12M2 10h12M6.5 3v10M11 3v10"/></g></svg>')
-  };
-
-  function isSheet() { return state.skin === 'sheet'; }
-  function L(key) { return WORDS[state.skin][key]; }
-
-  function shapeText(shape) {
-    if (!shape) return null;
-    return isSheet() ? (SHEET_SHAPE[shape.name] || shape) : shape;
-  }
-
-  function gradeText(grade) {
-    return isSheet() ? (SHEET_GRADE[grade] || grade) : grade;
-  }
-
-  function shapeName(name) {
-    var said = shapeText({ name: name, note: '' });
-    return said ? said.name : name;
-  }
-
-  /* Fixed strings swap in place, their originals kept on the node so flipping
-     back needs no second table. */
-  function applySkinText(on) {
-    var nodes = document.querySelectorAll('[data-sheet]'), i, el;
-    for (i = 0; i < nodes.length; i++) {
-      el = nodes[i];
-      if (el.getAttribute('data-plain') === null) {
-        el.setAttribute('data-plain', el.textContent);
-      }
-      el.textContent = on ? el.getAttribute('data-sheet') : el.getAttribute('data-plain');
-    }
-  }
-
-  function applySkin(skin) {
-    state.skin = skin === 'sheet' ? 'sheet' : 'classic';
-    if (isSheet()) document.documentElement.setAttribute('data-skin', 'sheet');
-    else document.documentElement.removeAttribute('data-skin');
-    els.skin.value = state.skin;
-    document.title = L('title');
-    els.favicon.setAttribute('href', ICONS[state.skin]);
-    applySkinText(isSheet());
-    refreshColors();
-    layout();          // the sheet spends more of the canvas on its header band
-    render();
-  }
-
-  function setSkin(skin) {
-    applySkin(skin);
-    store(SKIN_KEY, state.skin);
-  }
-
-  /* How a point is written down. Always the board's own notation, A-O with row
-     1 at the bottom, whichever skin is on: the move list is the game's record,
-     and a skin is paint. The sheet numbers its own headers the other way up to
-     stay convincing, so the two read differently on paper while pointing at the
-     same point - and it is the record that has to stay right. */
+  /* How a point is written down: the board's own notation, A-O with row 1 at
+     the bottom, the same form the engine prints. */
   function coordText(cell) {
     if (cell == null || cell < 0) return '';
     return G.toCoord(cell);
@@ -530,8 +389,7 @@
   function layout() {
     var css = canvas.getBoundingClientRect();
     var side = Math.max(160, Math.min(css.width, css.height));
-    // The sheet spends its margin on the header band, so it needs a wider one.
-    var pad = Math.round(side * (isSheet() ? 0.085 : 0.055));
+    var pad = Math.round(side * 0.055);
     var step = (side - pad * 2) / (SIZE - 1);
     state.metrics = { side: side, pad: pad, step: step, stone: step * 0.44 };
     return state.metrics;
@@ -562,166 +420,8 @@
   }
 
 
-  /* ---- the spreadsheet skin ----------------------------------------------
-     A skin repaints the board and nothing else. Cells are centred on the very
-     points the game is played on, so the coordinate system, the hit testing and
-     every rule stay exactly as they were: only what is drawn on top changes.
-
-     Two conventions have to give way to the sheet, though, or it stops being
-     convincing. Headers go across the top and down the left rather than along
-     the bottom and right, and rows count 1 downwards instead of 15 upwards -
-     a sheet whose row numbers decrease is the one thing that would give it
-     away. `coordText` follows the same rule so the panel and the board agree. */
-
-  var SHEET_COLUMNS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-
-  function sheetFont(scale, weight) {
-    return (weight ? weight + ' ' : '') +
-           Math.max(8, Math.round(state.metrics.step * scale)) +
-           'px -apple-system, "Segoe UI", Roboto, sans-serif';
-  }
-
-  function cellBox(cell) {
-    var m = state.metrics, half = m.step / 2;
-    return { x: px(colOf(cell)) - half, y: px(rowOf(cell)) - half, w: m.step, h: m.step };
-  }
-
-  function fillCell(cell, color, alpha) {
-    var b = cellBox(cell);
-    ctx.save();
-    if (alpha != null) ctx.globalAlpha = alpha;
-    ctx.fillStyle = color;
-    ctx.fillRect(b.x, b.y, b.w, b.h);
-    ctx.restore();
-  }
-
-  function outlineCell(cell, color, width, dash) {
-    var b = cellBox(cell);
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.lineWidth = width;
-    if (dash) ctx.setLineDash(dash);
-    ctx.strokeRect(b.x + width / 2, b.y + width / 2, b.w - width, b.h - width);
-    ctx.restore();
-  }
-
-  /* An ordinary-looking figure for a cell, derived from the cell index alone so
-     that a point always reads the same and the sheet never reshuffles itself
-     under the player. */
-  function sheetValue(cell) {
-    return 0.4 + ((cell * 73 + 41) % 92) / 10;
-  }
-
-  function sheetText(cell, player) {
-    if (isReplaying()) {
-      var n = board.history.indexOf(cell);
-      if (n >= 0) return String(n + 1);
-    }
-    return (player === BLACK ? '' : '-') + sheetValue(cell).toFixed(1);
-  }
-
-  /* Cell edges, carried on past the playing area so the sheet looks like it
-     continues off the screen instead of stopping in a tidy square. */
-  function sheetEdges() {
-    var m = state.metrics, out = [], v;
-    for (v = px(0) - m.step / 2; v > -m.step; v -= m.step) out.push(v);
-    for (v = px(0) + m.step / 2; v < m.side + m.step; v += m.step) out.push(v);
-    return out.sort(function (a, b) { return a - b; });
-  }
-
-  function paintSheet() {
-    var m = state.metrics, edges = sheetEdges(), i, v;
-    var head = px(0) - m.step / 2;      // the margin is the header band
-
-    ctx.fillStyle = COLOR.board;
-    ctx.fillRect(0, 0, m.side, m.side);
-
-    ctx.fillStyle = COLOR.sheetHeader;
-    ctx.fillRect(0, 0, m.side, head);
-    ctx.fillRect(0, 0, head, m.side);
-
-    /* The five handicap points, kept as landmarks. Every cell on a sheet looks
-       like every other one, so without them there is nothing for the eye to
-       anchor to and no way to tell at a glance where on the board you are.
-       Drawn as a tint rather than a dot because a shaded cell is a thing a
-       spreadsheet does, and a dot floating inside one is not - and painted
-       before the gridlines, so the grid still runs across them unbroken. */
-    for (i = 0; i < STAR.length; i++) {
-      fillCell(STAR[i][1] * SIZE + STAR[i][0], COLOR.star, 0.18);
-    }
-
-    ctx.strokeStyle = COLOR.grid;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (i = 0; i < edges.length; i++) {
-      v = Math.round(edges[i]) + 0.5;
-      ctx.moveTo(head, v); ctx.lineTo(m.side, v);
-      ctx.moveTo(v, head); ctx.lineTo(v, m.side);
-    }
-    ctx.stroke();
-
-    ctx.strokeStyle = COLOR.gridEdge;
-    ctx.beginPath();
-    for (i = 0; i < edges.length; i++) {
-      v = Math.round(edges[i]) + 0.5;
-      ctx.moveTo(v, 0); ctx.lineTo(v, head);
-      ctx.moveTo(0, v); ctx.lineTo(head, v);
-    }
-    v = Math.round(head) + 0.5;
-    ctx.moveTo(0, v); ctx.lineTo(m.side, v);
-    ctx.moveTo(v, 0); ctx.lineTo(v, m.side);
-    ctx.stroke();
-
-    /* A sheet says where you are twice: the outline round the cell, and the
-       row and column headers lighting up to meet it. The second is what you
-       actually read when the board is a field of identical squares, so the
-       headers follow the point under the pointer while there is one and the
-       cell just played the rest of the time. */
-    var focus = state.hover >= 0 && board.cells[state.hover] === EMPTY
-      ? state.hover
-      : (board.history.length ? board.history[board.history.length - 1] : -1);
-    var onCol = focus >= 0 ? colOf(focus) : -1;
-    var onRow = focus >= 0 ? rowOf(focus) : -1;
-
-    if (focus >= 0) {
-      ctx.save();
-      ctx.globalAlpha = 0.22;
-      ctx.fillStyle = COLOR.sheetActive;
-      ctx.fillRect(px(onCol) - m.step / 2, 0, m.step, head);
-      ctx.fillRect(0, px(onRow) - m.step / 2, head, m.step);
-      ctx.restore();
-    }
-
-    ctx.font = sheetFont(0.32, '600');
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    for (i = 0; i < edges.length - 1; i++) {
-      var mid = (edges[i] + edges[i + 1]) / 2;
-      var idx = Math.round((mid - px(0)) / m.step);
-      if (idx < 0 || idx >= SHEET_COLUMNS.length || mid < head) continue;
-      ctx.fillStyle = idx === onCol ? COLOR.sheetActive : COLOR.label;
-      ctx.fillText(SHEET_COLUMNS[idx], mid, head / 2);
-      ctx.fillStyle = idx === onRow ? COLOR.sheetActive : COLOR.label;
-      ctx.fillText(String(idx + 1), head / 2, mid);
-    }
-  }
-
-  function drawSheetValue(cell, player, alpha) {
-    var m = state.metrics;
-    ctx.save();
-    if (alpha != null) ctx.globalAlpha = alpha;
-    ctx.fillStyle = player === BLACK ? COLOR.sheetPos : COLOR.sheetNeg;
-    ctx.font = sheetFont(0.34);
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'middle';
-    // Against the right edge of the cell, the way a sheet aligns a number.
-    ctx.fillText(sheetText(cell, player), px(colOf(cell)) + m.step * 0.40, px(rowOf(cell)));
-    ctx.restore();
-  }
-
   function drawStone(cell, player, alpha) {
     var m = state.metrics;
-    if (isSheet()) { drawSheetValue(cell, player, alpha); return; }
     ctx.save();
     if (alpha != null) ctx.globalAlpha = alpha;
     ctx.beginPath();
@@ -801,7 +501,7 @@
     if (!m) return;
     var i;
 
-    if (isSheet()) paintSheet(); else paintBoard();
+    paintBoard();
 
     for (i = 0; i < SIZE * SIZE; i++) {
       if (board.cells[i] !== EMPTY) drawStone(i, board.cells[i]);
@@ -813,8 +513,7 @@
 
     if (!state.over && !state.thinking && !isReplaying() && state.hover >= 0 &&
         board.cells[state.hover] === EMPTY && isHumanTurn()) {
-      if (isSheet()) fillCell(state.hover, COLOR.sheetHover);
-      drawStone(state.hover, state.turn, isSheet() ? 0.5 : 0.32);
+      drawStone(state.hover, state.turn, 0.32);
     }
 
     if (state.hint >= 0 && board.cells[state.hint] === EMPTY) markHint(state.hint);
@@ -826,14 +525,12 @@
 
     drawCursor();
 
-    // Last, so the winning line does not strike through the numbers. The sheet
-    // writes the move number into the cell itself, so it needs no second pass.
-    if (isReplaying() && !isSheet()) drawMoveNumbers();
+    // Last, so the winning line does not strike through the numbers.
+    if (isReplaying()) drawMoveNumbers();
   }
 
   function markHint(cell) {
     var m = state.metrics;
-    if (isSheet()) { outlineCell(cell, COLOR.sheetActive, 1.5, [3, 3]); return; }
     ctx.save();
     ctx.strokeStyle = COLOR.hint;
     ctx.lineWidth = 1.5;
@@ -846,18 +543,6 @@
 
   function markLast(cell) {
     var m = state.metrics;
-    if (isSheet()) {
-      // The active cell: a solid outline with the little fill handle at its
-      // bottom right, which is the detail that sells a spreadsheet.
-      var w = Math.max(2, m.step * 0.07);
-      outlineCell(cell, COLOR.sheetActive, w);
-      var b = cellBox(cell), size = Math.max(3, m.step * 0.14);
-      ctx.save();
-      ctx.fillStyle = COLOR.sheetActive;
-      ctx.fillRect(b.x + b.w - size / 2, b.y + b.h - size / 2, size, size);
-      ctx.restore();
-      return;
-    }
     ctx.save();
     if (isReplaying()) {
       // The number already sits in the middle of the stone, so the marker
@@ -877,14 +562,7 @@
   }
 
   function markWin(line) {
-    var m = state.metrics, i;
-    if (isSheet()) {
-      // A selected range, which is how a sheet points at five cells at once.
-      for (i = 0; i < line.length; i++) fillCell(line[i], COLOR.sheetSelect, 0.45);
-      for (i = 0; i < line.length; i++) drawStone(line[i], board.cells[line[i]]);
-      for (i = 0; i < line.length; i++) outlineCell(line[i], COLOR.sheetActive, 1.5);
-      return;
-    }
+    var m = state.metrics;
     var a = line[0], b = line[line.length - 1];
     ctx.save();
     ctx.strokeStyle = COLOR.win;
@@ -1101,22 +779,6 @@
     if (!state.forbidden.length) return;
     var m = state.metrics, arm = m.stone * 0.5, i, x, y;
 
-    if (isSheet()) {
-      // The little corner flag a sheet puts on a cell that failed validation.
-      ctx.save();
-      ctx.fillStyle = COLOR.win;
-      for (i = 0; i < state.forbidden.length; i++) {
-        var b = cellBox(state.forbidden[i]), size = Math.max(4, m.step * 0.22);
-        ctx.beginPath();
-        ctx.moveTo(b.x + b.w - size, b.y);
-        ctx.lineTo(b.x + b.w, b.y);
-        ctx.lineTo(b.x + b.w, b.y + size);
-        ctx.closePath();
-        ctx.fill();
-      }
-      ctx.restore();
-      return;
-    }
     ctx.save();
     ctx.strokeStyle = COLOR.win;
     ctx.lineWidth = Math.max(1.5, m.step * 0.055);
@@ -1327,7 +989,7 @@
   }
 
   function resultText(game) {
-    return game.winner ? name(game.winner) + L('wins') : L('draw');
+    return game.winner ? name(game.winner) + ' wins' : 'Draw';
   }
 
   function whenText(at) {
@@ -1444,7 +1106,7 @@
 
   function armClear(on) {
     clearArmed = !!on;
-    els.historyClear.textContent = clearArmed ? L('clearSure') : L('clearList');
+    els.historyClear.textContent = clearArmed ? 'Clear all · sure?' : 'Clear history';
   }
 
   function clearHistory() {
@@ -1478,7 +1140,7 @@
         var row = {
           n: i + 1,
           player: sideName(playerAt(i)),
-          coord: G.toCoord(cell),      // the record, never the skin's wording
+          coord: G.toCoord(cell),
           x: point.x,
           y: point.y
         };
@@ -1560,7 +1222,7 @@
               '<span class="sd">' + name(playerAt(i)).charAt(0) + '</span>' +
               '<span class="c">' + coordText(moves[i]) + '</span>' +
               '<span class="ev">' + (g ? formatValue(g.value) : '') + '</span>' +
-              '<span class="q">' + (g ? gradeText(g.grade) : '') + '</span>' +
+              '<span class="q">' + (g ? g.grade : '') + '</span>' +
               '</li>';
     }
     return html;
@@ -1603,14 +1265,11 @@
     els.replay.hidden = !game;
     if (!game) return;
 
-    els.replayTitle.textContent = resultText(game) + ' · ' + L('unit').toLowerCase() +
-                                  ' ' + r.ply + ' of ' + game.moves.length;
+    els.replayTitle.textContent = resultText(game) + ' · move ' + r.ply + ' of ' + game.moves.length;
 
     var rv = state.reviewing;
     els.reviewGame.disabled = backend.kind !== 'rapfi' || !!rv;
-    els.reviewGame.textContent = rv
-      ? L('reviewing') + ' ' + rv.done + '/' + rv.total
-      : L('review');
+    els.reviewGame.textContent = rv ? 'Reviewing ' + rv.done + '/' + rv.total : 'Review';
     els.reviewSummary.innerHTML = reviewSummaryHtml(game);
     els.reviewSummary.hidden = !game.review;
     els.replayNote.innerHTML = reviewText(game.moves, game.grades || [], r.ply - 1, true);
@@ -1953,7 +1612,7 @@
     if (!g) return '';
     var played = coordText(moves[index]);
     var strong = function (t) { return asHtml ? '<b>' + t + '</b>' : t; };
-    var text = L('unit') + ' ' + (index + 1) + ' ' + strong(played) + ' · ' + gradeText(g.grade);
+    var text = 'Move ' + (index + 1) + ' ' + strong(played) + ' · ' + g.grade;
     if (g.grade === 'Best') return text;
 
     // A move that turns a playable position into a lost one shows a loss on
@@ -1963,8 +1622,8 @@
 
     var alt = g.bestCell >= 0 && g.bestCell !== moves[index] ? coordText(g.bestCell) : '';
     if (alt) {
-      if (g.missedWin) text += ' · ' + strong(alt) + L('wasForcedWin');
-      else if (g.bestShape) text += ' · ' + strong(alt) + L('wouldMake') + shapeName(g.bestShape);
+      if (g.missedWin) text += ' · ' + strong(alt) + ' was a forced win';
+      else if (g.bestShape) text += ' · ' + strong(alt) + ' would have made ' + g.bestShape;
       else text += ' · best was ' + strong(alt);
       if (g.bestLine && g.bestLine.length > 1) text += ' (' + g.bestLine.join(' ') + ')';
     }
@@ -1977,24 +1636,24 @@
     var line = function (side, key) {
       var c = rv.counts[key] || {}, parts = [];
       ['Best', 'Good', 'Inaccuracy', 'Mistake', 'Blunder'].forEach(function (grade) {
-        if (c[grade]) parts.push(c[grade] + ' ' + gradeText(grade).toLowerCase());
+        if (c[grade]) parts.push(c[grade] + ' ' + grade.toLowerCase());
       });
       var acc = rv.accuracy[key];
       return '<div><b>' + name(side) + '</b> <span class="acc">' +
-             (acc === null ? '–' : acc + '%') + '</span> ' + L('accuracy') +
+             (acc === null ? '–' : acc + '%') + '</span> accuracy' +
              (parts.length ? ' · ' + parts.join(', ') : '') + '</div>';
     };
     var html = line(BLACK, 'black') + line(WHITE, 'white');
     if (rv.turning) {
       var t = rv.turning;
-      html += '<div>' + L('turning') + ': <span data-ply="' + t.ply + '">' +
-              L('unit').toLowerCase() + ' ' + t.ply + '</span>, ' + name(t.side) +
-              ' ' + coordText(game.moves[t.ply - 1]) + ' — ' + L('winChance') + ' ' +
+      html += '<div>Turning point: <span data-ply="' + t.ply + '">' +
+              'move ' + t.ply + '</span>, ' + name(t.side) +
+              ' ' + coordText(game.moves[t.ply - 1]) + ' — win chance ' +
               Math.round(t.from * 100) + '% → ' + Math.round(t.to * 100) + '%</div>';
     }
     if (rv.missed.length) {
-      html += '<div>' + L('missed') + ': ' + rv.missed.map(function (m) {
-        return '<span data-ply="' + m.ply + '">' + L('unit').toLowerCase() + ' ' + m.ply +
+      html += '<div>Missed wins: ' + rv.missed.map(function (m) {
+        return '<span data-ply="' + m.ply + '">move ' + m.ply +
                '</span> (' + coordText(m.cell) + ')';
       }).join(', ') + '</div>';
     }
@@ -2027,24 +1686,6 @@
   function drawCandidates() {
     if (!candidatesShown()) return;
     var m = state.metrics, i, c, x, y;
-
-    if (isSheet()) {
-      // Projections: a dashed cell and the figure it would carry.
-      ctx.save();
-      ctx.textAlign = 'right';
-      ctx.textBaseline = 'middle';
-      for (i = 0; i < state.candidates.length; i++) {
-        c = state.candidates[i];
-        outlineCell(c.cell, COLOR.sheetActive, i === 0 ? 1.5 : 1, [3, 2]);
-        if (c.score === '') continue;
-        ctx.globalAlpha = Math.max(0.4, 1 - i * 0.11);
-        ctx.fillStyle = COLOR.label;
-        ctx.font = sheetFont(0.3, i === 0 ? '600' : '');
-        ctx.fillText(formatEval(c.score), px(colOf(c.cell)) + m.step * 0.40, px(rowOf(c.cell)));
-      }
-      ctx.restore();
-      return;
-    }
 
     ctx.save();
     ctx.textAlign = 'center';
@@ -2129,17 +1770,6 @@
     var ranked = [];
     if (candidatesShown()) {
       for (i = 0; i < state.candidates.length; i++) ranked.push(state.candidates[i].cell);
-    }
-
-    if (isSheet()) {
-      // Conditional formatting: the same reading, shown the way a sheet shows a
-      // heat scale, as a wash across the cells rather than as dots on points.
-      for (i = 0; i < state.valueMap.length; i++) {
-        if (ranked.indexOf(state.valueMap[i].cell) >= 0) continue;
-        fillCell(state.valueMap[i].cell, COLOR.sheetHeat,
-                 0.06 + 0.42 * state.valueMap[i].weight);
-      }
-      return;
     }
 
     ctx.save();
@@ -2327,16 +1957,14 @@
 
   /* ---- game flow -------------------------------------------------------- */
 
-  function name(player) { return player === BLACK ? L('black') : L('white'); }
+  function name(player) { return player === BLACK ? 'Black' : 'White'; }
 
   function play(cell) {
     if (state.over || cell < 0 || board.cells[cell] !== EMPTY) return false;
     var player = state.turn;
 
     if (player === BLACK && state.forbidden.indexOf(cell) >= 0) {
-      state.error = coordText(cell) + (isSheet()
-        ? ' fails validation: ' + forbiddenReason(cell)
-        : ' is forbidden for Black: ' + forbiddenReason(cell));
+      state.error = coordText(cell) + ' is forbidden for Black: ' + forbiddenReason(cell);
       render();
       return false;
     }
@@ -2521,7 +2149,7 @@
     hold.raf = 0;
     els.undoAll.classList.remove('holding');
     els.undoAll.style.setProperty('--hold', '0%');
-    els.undoAll.textContent = L('clear');
+    els.undoAll.textContent = 'Undo all';
   }
 
   function toggleHint() {
@@ -2566,7 +2194,7 @@
   var wantedRule = els.rule.value;
 
   function paintBadge() {
-    els.engineBadge.textContent = isSheet() ? WORDS.sheet.badge : backend.label;
+    els.engineBadge.textContent = backend.label;
   }
 
   function setBackend(next) {
@@ -2593,17 +2221,17 @@
     var text, dotClass;
     var replayed = isReplaying() ? state.games[state.replay.index] : null;
     if (replayed) {
-      text = L('replay') + resultText(replayed);
+      text = 'Replay · ' + resultText(replayed);
       dotClass = replayed.winner === WHITE ? 'stone-dot white'
         : (replayed.winner ? 'stone-dot' : 'stone-dot none');
     } else if (state.over) {
-      text = state.winner ? name(state.winner) + L('wins') : L('draw');
+      text = state.winner ? name(state.winner) + ' wins' : 'Draw';
       dotClass = state.winner === WHITE ? 'stone-dot white'
         : (state.winner ? 'stone-dot' : 'stone-dot none');
     } else {
       text = state.thinking
-        ? (state.analysing ? L('analysing') : L('thinking'))
-        : name(state.turn) + L('toMove');
+        ? (state.analysing ? 'Analysing' : 'Engine is thinking')
+        : name(state.turn) + ' to move';
       if (isDemo() && !state.thinking && state.demoPaused) {
         text = name(state.turn) + ' to play · held';
       }
@@ -2612,7 +2240,7 @@
     els.statusText.textContent = text;
     els.turnDot.className = dotClass;
 
-    var meta = L('unit') + ' ' + board.history.length;
+    var meta = 'Move ' + board.history.length;
     if (replayed) meta += ' of ' + replayed.moves.length;
     else if (isDemo()) meta += state.over ? '' : (state.demoPaused ? ' · holding' : ' · running');
     else if (!state.over && engineColor()) meta += ' · you are ' + name(3 - engineColor());
@@ -2621,10 +2249,10 @@
     els.undo.disabled = state.thinking || isReplaying() || board.history.length === 0;
     els.undoAll.disabled = els.undo.disabled;
     if (els.undoAll.disabled) cancelHold();   // nothing left to wipe, drop the countdown
-    if (!hold.active) els.undoAll.textContent = L('clear');
+    if (!hold.active) els.undoAll.textContent = 'Undo all';
     els.hint.disabled = isReplaying();
     paintBadge();
-    els.hint.textContent = state.hintOn ? L('hintOn') : L('hintOff');
+    els.hint.textContent = state.hintOn ? 'Hint on' : 'Hint off';
     els.hint.setAttribute('aria-pressed', state.hintOn ? 'true' : 'false');
     els.demoControls.hidden = !isDemo();
     if (isDemo()) {
@@ -2644,9 +2272,9 @@
       : (backend.kind === 'rapfi'
         ? DIFFICULTY_NOTE[els.difficulty.value]
         : 'Without Rapfi the built-in engine approximates this by search depth.');
-    els.valueMap.textContent = state.valueMapOn ? L('mapOn') : L('mapOff');
+    els.valueMap.textContent = state.valueMapOn ? 'Value map on' : 'Value map off';
     els.valueMap.setAttribute('aria-pressed', state.valueMapOn ? 'true' : 'false');
-    els.evalBarToggle.textContent = state.evalBarOn ? L('barOn') : L('barOff');
+    els.evalBarToggle.textContent = state.evalBarOn ? 'Evaluation bar on' : 'Evaluation bar off';
     els.evalBarToggle.setAttribute('aria-pressed', state.evalBarOn ? 'true' : 'false');
 
     // A replay has the board, so the live log comes from what it put aside.
@@ -2681,24 +2309,20 @@
       return;
     }
     var shape = state.shapes[index];
-    var said = shapeText(shape);
     moveEl.textContent = name(playerAt(index)).charAt(0) + " " + coordText(board.history[index]);
-    shapeEl.textContent = said ? said.name : "";
+    shapeEl.textContent = shape ? shape.name : "";
   }
 
   /* The move just played sits on the right, the one before it on the left. */
   function renderCoach() {
     var i = board.history.length - 1;
-    var phase = phaseName();
-    els.coachPhase.textContent = titleCase(isSheet() ? (SHEET_PHASE[phase] || phase) : phase);
+    els.coachPhase.textContent = titleCase(phaseName());
 
     if (i < 0) {
       els.coachPrev.hidden = true;
-      els.curMove.textContent = isSheet() ? "Actual opens" : "Black opens";
+      els.curMove.textContent = "Black opens";
       els.curShape.textContent = "";
-      els.coachNote.textContent = isSheet()
-        ? "the first entry usually goes near the middle"
-        : "the first stone usually goes near the centre";
+      els.coachNote.textContent = "the first stone usually goes near the centre";
       return;
     }
 
@@ -2708,12 +2332,12 @@
 
     if (state.over) {
       els.coachNote.textContent = state.winner
-        ? name(state.winner) + (isSheet() ? " closed the run of five" : " made five in a row")
-        : (isSheet() ? "the sheet is full" : "the board is full");
+        ? name(state.winner) + " made five in a row"
+        : "the board is full";
       return;
     }
-    var said = shapeText(state.shapes[i]);
-    els.coachNote.textContent = said ? said.note : "";
+    var shape = state.shapes[i];
+    els.coachNote.textContent = shape ? shape.note : "";
   }
 
   function render() {
@@ -2876,11 +2500,6 @@
   document.addEventListener('keydown', function (e) {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     var k = e.key.toLowerCase();
-    if (k === 'escape') {
-      e.preventDefault();
-      setSkin(isSheet() ? 'classic' : 'sheet');
-      return;
-    }
     if (e.target.tagName === 'SELECT') return;
     if (isReplaying() && (k === 'arrowleft' || k === 'arrowright')) {
       e.preventDefault();
@@ -2938,7 +2557,6 @@
     resize();
   }
 
-  var SKIN_KEY = 'gomoku.skin';
   var EVALBAR_KEY = 'gomoku.evalbar';
   var VALUEMAP_KEY = 'gomoku.valuemap';
   var DIFFICULTY_KEY = 'gomoku.difficulty';
@@ -2994,7 +2612,6 @@
   });
 
   els.theme.addEventListener('change', function () { setTheme(els.theme.value); });
-  els.skin.addEventListener('change', function () { setSkin(els.skin.value); });
 
   if (window.matchMedia) {
     var dark = window.matchMedia('(prefers-color-scheme: dark)');
@@ -3007,8 +2624,8 @@
 
   /* ---- start ------------------------------------------------------------- */
 
+  if (SPECTATE) document.title = SPECTATE_TITLE;
   initTheme();
-  applySkin(recall(SKIN_KEY) === 'sheet' ? 'sheet' : 'classic');
   state.evalBarOn = recall(EVALBAR_KEY) !== 'off';
   state.valueMapOn = recall(VALUEMAP_KEY) === 'on';
   if (DIFFICULTY[recall(DIFFICULTY_KEY)]) els.difficulty.value = recall(DIFFICULTY_KEY);

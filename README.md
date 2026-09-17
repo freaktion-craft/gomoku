@@ -104,11 +104,10 @@ an Intel Mac has to build Rapfi from source or fall back to `local-engine.js`.
 | History | the left panel’s second tab: every finished game, replayed on a numbered board |
 | Review | in the History tab: the engine reads a finished game back and says what each move cost and what would have been better |
 | Export JSON | writes the game out as a record: notation, engine coordinates, evaluation and grade per move |
-| View | Board, or Sheet - the spreadsheet skin; `Esc` flips between them |
 | Hide | collapses a panel; a tab on that edge of the window brings it back |
 
 `N` new game, `U` undo, `H` hint on or off, `V` value map on or off, `←` `→`
-step through a replay, `Esc` switches view. Undo
+step through a replay. Undo
 takes back both plies when playing the engine. Scored options are drawn on the board and listed in the panel, and
 clicking one plays it.
 
@@ -429,48 +428,6 @@ and the game could never be resumed past a mistake.
 While a fixed matchup is set, the Difficulty dial has nothing to say and is
 disabled, rather than sitting there looking as though it still applies.
 
-## Skins
-
-The **View** control has two settings. *Board* is the game as it is. *Sheet*
-repaints the whole page as a spreadsheet: cells instead of stones, blue and red
-figures instead of black and white, headers across the top and down the left, the
-last move as the active cell complete with its fill handle, the value map as
-conditional formatting, and a validation flag on any cell Black may not use. The
-panel, the move log, the coaching cards, the tab title and the favicon all change
-with it. **Escape** flips between the two without going near the control, which
-is the point of having it.
-
-Nothing about the game changes. Cells are centred on the very points the board is
-played on, so the geometry, the hit testing and every rule stay exactly as they
-were: a skin repaints and renames, and that is all it does.
-
-Two of the board's conventions have to give way, or the sheet stops being
-convincing. Headers move from the bottom and right to the top and left, and rows
-count 1 downwards rather than 15 upwards, because a sheet whose row numbers
-decrease is the one thing that would give it away.
-
-The move list does **not** follow. It is the game's record, and a skin is paint:
-`coordText` always writes the board's own notation, A-O with row 1 at the bottom,
-so a game played on the sheet reads back afterwards as a game of gomoku. The two
-therefore disagree on paper while pointing at the same point - the top row is
-`15` in the record and `1` on the sheet - and the record is the one that has to
-stay right.
-
-Where the wording lives: fixed strings carry their replacement in a `data-sheet`
-attribute in `index.html`, next to the words they stand in for. Anything
-`render()` rewrites comes from the `WORDS` table in `app.js`, with `SHEET_SHAPE`
-for the vocabulary of threats and `SHEET_GRADE` for the move grades. The palette
-is one `:root[data-skin="sheet"]` block in `styles.css`, which the canvas picks up
-for free because it already reads every colour from custom properties. The sheet
-is light in every theme on purpose: a work sheet on a dark background is the one
-thing that would draw the eye.
-
-The five handicap points are marked on both boards - as dots on the board, and as
-tinted cells on the sheet, where every square otherwise looks like every other one
-and there is nothing for the eye to anchor to. On the sheet the row and column
-headers also light up to meet the point under the pointer, or the cell just
-played when there is no pointer.
-
 ## Game review
 
 Open a finished game in the History tab and press **Review**. The engine reads
@@ -528,8 +485,8 @@ wants, so it can go either way:
   ] }
 ```
 
-`coord` is always gomoku notation and `grade` is always the plain name, whatever
-skin was on when the game was played: the file is a record, not a screenshot.
+`coord` is always gomoku notation and `grade` is always the plain name: the file
+is a record, not a screenshot.
 
 ## Value map
 

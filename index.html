@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Rapfi Gomoku</title>
-<link rel="icon" id="favicon" href="data:,">
+<link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2016%2016%22%3E%3Crect%20width%3D%2216%22%20height%3D%2216%22%20rx%3D%222%22%20fill%3D%22%23e6e4df%22%2F%3E%3Ccircle%20cx%3D%228%22%20cy%3D%228%22%20r%3D%224.5%22%20fill%3D%22%2317171a%22%2F%3E%3C%2Fsvg%3E">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -12,8 +12,8 @@
   <aside class="panel panel-left" id="panelLeft">
     <div class="panel-left-head">
       <div class="left-tabs" role="tablist">
-        <button id="tabMoves" class="tab-btn" role="tab" aria-selected="true" data-sheet="Revisions">Moves</button>
-        <button id="tabHistory" class="tab-btn" role="tab" aria-selected="false" data-sheet="Versions">History</button>
+        <button id="tabMoves" class="tab-btn" role="tab" aria-selected="true">Moves</button>
+        <button id="tabHistory" class="tab-btn" role="tab" aria-selected="false">History</button>
       </div>
       <button id="leftToggle" class="icon-btn" title="Hide this panel">Hide</button>
     </div>
@@ -38,7 +38,7 @@
           <button id="replayPrev" class="btn" title="One move back">Back</button>
           <button id="replayNext" class="btn" title="One move on">Next</button>
           <button id="replayEnd" class="btn" title="Jump to the final position">End</button>
-          <button id="replayClose" class="btn" data-sheet="Close version">Close replay</button>
+          <button id="replayClose" class="btn">Close replay</button>
         </div>
       </div>
       <div class="list-foot history-foot">
@@ -79,7 +79,7 @@
   <aside class="panel">
     <header class="panel-head">
       <div>
-        <h1 data-sheet="Q3_forecast">Gomoku</h1>
+        <h1>Gomoku</h1>
         <p class="sub" id="engineBadge">connecting to engine&hellip;</p>
       </div>
       <div class="head-actions">
@@ -101,26 +101,18 @@
     </section>
 
     <section class="group">
-      <label class="label" for="skin">View</label>
-      <select id="skin">
-        <option value="classic" selected>Board</option>
-        <option value="sheet">Sheet</option>
-      </select>
-    </section>
-
-    <section class="group">
-      <label class="label" for="mode" data-sheet="Data entry">Opponent</label>
+      <label class="label" for="mode">Opponent</label>
       <select id="mode">
-        <option value="ai-white" selected data-sheet="Auto-fill Budget">Engine plays White</option>
-        <option value="ai-black" data-sheet="Auto-fill Actual">Engine plays Black</option>
-        <option value="human" data-sheet="Manual entry">Two players</option>
-        <option value="coach" data-sheet="Review only">Tactics: engine only advises</option>
-        <option value="demo" data-sheet="Auto-fill both columns">Sparring: engine plays itself</option>
+        <option value="ai-white" selected>Engine plays White</option>
+        <option value="ai-black">Engine plays Black</option>
+        <option value="human">Two players</option>
+        <option value="coach">Tactics: engine only advises</option>
+        <option value="demo">Sparring: engine plays itself</option>
       </select>
     </section>
 
     <section class="group" id="demoControls" hidden>
-      <label class="label" for="demoMatch" data-sheet="Column pair">Matchup</label>
+      <label class="label" for="demoMatch">Matchup</label>
       <select id="demoMatch">
         <option value="full-club" selected>Full vs Club</option>
         <option value="club-club">Club vs Club</option>
@@ -129,7 +121,7 @@
       </select>
       <p class="hint-note" id="demoNote"></p>
 
-      <label class="label" for="demoPace" data-sheet="Refresh">Pace</label>
+      <label class="label" for="demoPace">Pace</label>
       <select id="demoPace">
         <option value="0">As fast as it can</option>
         <option value="800">Brisk</option>
@@ -146,29 +138,29 @@
     </section>
 
     <section class="group">
-      <label class="label" for="difficulty" data-sheet="Model detail">Difficulty</label>
+      <label class="label" for="difficulty">Difficulty</label>
       <select id="difficulty"
               title="The engine always reads the position in full; a lower setting only makes it settle for a move near its best rather than the best">
-        <option value="beginner" data-sheet="Rounded">Beginner</option>
-        <option value="casual" data-sheet="Draft">Casual</option>
-        <option value="club" data-sheet="Standard">Club</option>
-        <option value="strong" data-sheet="Detailed">Strong</option>
-        <option value="full" selected data-sheet="Exact">Full</option>
+        <option value="beginner">Beginner</option>
+        <option value="casual">Casual</option>
+        <option value="club">Club</option>
+        <option value="strong">Strong</option>
+        <option value="full" selected>Full</option>
       </select>
       <p class="hint-note" id="difficultyNote"></p>
     </section>
 
     <section class="group">
-      <label class="label" for="rule" data-sheet="Validation">Rule</label>
+      <label class="label" for="rule">Rule</label>
       <select id="rule">
-        <option value="freestyle" data-sheet="None">Freestyle: five or more</option>
-        <option value="standard" data-sheet="Range check">Standard: exactly five</option>
-        <option value="renju" id="renjuOption" selected data-sheet="Strict (Actual)">Renju: Black restricted</option>
+        <option value="freestyle">Freestyle: five or more</option>
+        <option value="standard">Standard: exactly five</option>
+        <option value="renju" id="renjuOption" selected>Renju: Black restricted</option>
       </select>
     </section>
 
     <section class="group actions">
-      <button id="newGame" class="btn btn-primary" data-sheet="New sheet">New game</button>
+      <button id="newGame" class="btn btn-primary">New game</button>
       <button id="undo" class="btn">Undo</button>
       <button id="undoAll" class="btn" title="Hold for 1.5 seconds to clear the board">Undo all</button>
       <button id="hint" class="btn btn-toggle" aria-pressed="false">Hint off</button>
@@ -178,23 +170,23 @@
 
     <section class="group analysis" id="analysis">
       <details class="fold" id="engineFold">
-      <summary class="label" data-sheet="Recalculation">Engine</summary>
+      <summary class="label">Engine</summary>
       <div class="fold-body">
       <dl class="readout">
-        <div><dt data-sheet="Passes">Depth</dt><dd id="anDepth">-</dd></div>
-        <div><dt data-sheet="Delta">Eval</dt><dd id="anEval">-</dd></div>
-        <div><dt data-sheet="Cells">Nodes</dt><dd id="anNodes">-</dd></div>
-        <div><dt data-sheet="Rate">Speed</dt><dd id="anSpeed">-</dd></div>
+        <div><dt>Depth</dt><dd id="anDepth">-</dd></div>
+        <div><dt>Eval</dt><dd id="anEval">-</dd></div>
+        <div><dt>Nodes</dt><dd id="anNodes">-</dd></div>
+        <div><dt>Speed</dt><dd id="anSpeed">-</dd></div>
       </dl>
       <div class="pv" id="anPv"></div>
 
-      <label class="label" for="nbest" data-sheet="Projections">Score my options</label>
+      <label class="label" for="nbest">Score my options</label>
       <select id="nbest">
         <option value="0" selected>Off</option>
-        <option value="3" data-sheet="Top 3 cells">Top 3 moves</option>
-        <option value="5" data-sheet="Top 5 cells">Top 5 moves</option>
-        <option value="10" data-sheet="Top 10 cells">Top 10 moves</option>
-        <option value="20" data-sheet="Top 20 cells">Top 20 moves</option>
+        <option value="3">Top 3 moves</option>
+        <option value="5">Top 5 moves</option>
+        <option value="10">Top 10 moves</option>
+        <option value="20">Top 20 moves</option>
       </select>
       <ol class="candidates" id="candList"></ol>
       <div class="review" id="review"></div>
@@ -222,7 +214,7 @@
     <details class="fold foot-fold" id="keysFold">
     <summary class="label">Keys</summary>
     <footer class="foot">
-      <span data-sheet="N new sheet">N new game</span><span>U undo</span><span data-sheet="Shift+U hold to clear">Shift+U hold to undo all</span><span data-sheet="H suggest on/off">H hint on/off</span><span data-sheet="V heatmap">V value map</span><span data-sheet="&larr; &rarr; step a version">&larr; &rarr; step a replay</span><span>Esc switches view</span>
+      <span>N new game</span><span>U undo</span><span>Shift+U hold to undo all</span><span>H hint on/off</span><span>V value map</span><span>&larr; &rarr; step a replay</span>
     </footer>
     </details>
   </aside>

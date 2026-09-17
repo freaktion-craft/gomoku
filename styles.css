@@ -37,14 +37,6 @@
   --marker: #3d3d38;
   --win: #c0392b;
 
-  --sheet-header: #f1f3f4;
-  --sheet-pos: #1a56b8;
-  --sheet-neg: #c5221f;
-  --sheet-active: #107c41;
-  --sheet-hover: #eef1f4;
-  --sheet-heat: #34a853;
-  --sheet-select: #cfe3d4;
-
   color-scheme: light;
 }
 
@@ -102,64 +94,6 @@
   --win: #d0564a;
 
   color-scheme: dark;
-}
-
-/* Spreadsheet skin. It is deliberately light in every theme: a work sheet on a
-   dark background is the one thing that would draw the eye. Declared after both
-   theme blocks so it wins at equal specificity, and it redefines every colour
-   the canvas reads rather than inheriting half a palette. */
-:root[data-skin="sheet"] {
-  --bg: #f8f9fa;
-  --surface: #ffffff;
-  --border: #dadce0;
-  --text: #202124;
-  --text-dim: #5f6368;
-  --text-faint: #9aa0a6;
-  --accent: #107c41;
-  --accent-hover: #0e6b38;
-  --accent-text: #ffffff;
-  --focus: #1a73e8;
-
-  --board: #ffffff;
-  --grid: #e0e2e5;
-  --grid-edge: #c3c6ca;
-  --coord: #5f6368;
-  --star: #7d8794;
-  --stone-black: #1a56b8;
-  --stone-black-edge: #1a56b8;
-  --stone-white: #c5221f;
-  --stone-white-edge: #c5221f;
-  --marker: #80868b;
-  --win: #107c41;
-
-  --sheet-header: #f1f3f4;
-  --sheet-pos: #1a56b8;
-  --sheet-neg: #c5221f;
-  --sheet-active: #107c41;
-  --sheet-hover: #eef1f4;
-  --sheet-heat: #34a853;
-  --sheet-select: #cfe3d4;
-
-  color-scheme: light;
-}
-
-/* Things with no place in a spreadsheet. */
-:root[data-skin="sheet"] .glossary,
-:root[data-skin="sheet"] .hint-note { display: none; }
-
-/* The variance bar reads as a column of figures rather than two stones. */
-:root[data-skin="sheet"] .evalbar {
-  background: #e8eaed;
-  border-color: var(--border);
-}
-:root[data-skin="sheet"] .evalbar-fill { background: #cfe3d4; }
-:root[data-skin="sheet"] .evalbar-num.top { color: #c5221f; }
-:root[data-skin="sheet"] .evalbar-num.bottom { color: #107c41; }
-
-:root[data-skin="sheet"] .panel-head h1 {
-  font-size: 15px;
-  font-weight: 500;
-  letter-spacing: 0;
 }
 
 * { box-sizing: border-box; }
@@ -613,8 +547,7 @@ body {
   gap: 10px;
 }
 
-/* The title gives way rather than shoving the controls off the edge: a skin can
-   put a much longer name here than "Gomoku". */
+/* The title gives way rather than shoving the controls off the edge. */
 .panel-head > div:first-child { min-width: 0; }
 
 .panel-head h1 {
