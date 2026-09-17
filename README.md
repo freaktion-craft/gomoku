@@ -102,6 +102,8 @@ an Intel Mac has to build Rapfi from source or fall back to `local-engine.js`.
 | Theme | System, Light or Dark; the board follows the panel |
 | Evaluation bar | the vertical gauge beside the board; switch it off in the engine section |
 | History | the left panel’s second tab: every finished game, replayed on a numbered board |
+| Review | in the History tab: the engine reads a finished game back and says what each move cost and what would have been better |
+| Export JSON | writes the game out as a record: notation, engine coordinates, evaluation and grade per move |
 | View | Board, or Sheet - the spreadsheet skin; `Esc` flips between them |
 | Hide | collapses a panel; a tab on that edge of the window brings it back |
 
@@ -426,6 +428,108 @@ and the game could never be resumed past a mistake.
 
 While a fixed matchup is set, the Difficulty dial has nothing to say and is
 disabled, rather than sitting there looking as though it still applies.
+
+## Skins
+
+The **View** control has two settings. *Board* is the game as it is. *Sheet*
+repaints the whole page as a spreadsheet: cells instead of stones, blue and red
+figures instead of black and white, headers across the top and down the left, the
+last move as the active cell complete with its fill handle, the value map as
+conditional formatting, and a validation flag on any cell Black may not use. The
+panel, the move log, the coaching cards, the tab title and the favicon all change
+with it. **Escape** flips between the two without going near the control, which
+is the point of having it.
+
+Nothing about the game changes. Cells are centred on the very points the board is
+played on, so the geometry, the hit testing and every rule stay exactly as they
+were: a skin repaints and renames, and that is all it does.
+
+Two of the board's conventions have to give way, or the sheet stops being
+convincing. Headers move from the bottom and right to the top and left, and rows
+count 1 downwards rather than 15 upwards, because a sheet whose row numbers
+decrease is the one thing that would give it away.
+
+The move list does **not** follow. It is the game's record, and a skin is paint:
+`coordText` always writes the board's own notation, A-O with row 1 at the bottom,
+so a game played on the sheet reads back afterwards as a game of gomoku. The two
+therefore disagree on paper while pointing at the same point - the top row is
+`15` in the record and `1` on the sheet - and the record is the one that has to
+stay right.
+
+Where the wording lives: fixed strings carry their replacement in a `data-sheet`
+attribute in `index.html`, next to the words they stand in for. Anything
+`render()` rewrites comes from the `WORDS` table in `app.js`, with `SHEET_SHAPE`
+for the vocabulary of threats and `SHEET_GRADE` for the move grades. The palette
+is one `:root[data-skin="sheet"]` block in `styles.css`, which the canvas picks up
+for free because it already reads every colour from custom properties. The sheet
+is light in every theme on purpose: a work sheet on a dark background is the one
+thing that would draw the eye.
+
+The five handicap points are marked on both boards - as dots on the board, and as
+tinted cells on the sheet, where every square otherwise looks like every other one
+and there is nothing for the eye to anchor to. On the sheet the row and column
+headers also light up to meet the point under the pointer, or the cell just
+played when there is no pointer.
+
+## Game review
+
+Open a finished game in the History tab and press **Review**. The engine reads
+every position of the game back at full strength, the board walks through the
+game as it goes, and when it is done there is a verdict above the replay log and
+a line of commentary for whichever move is being shown:
+
+> Move 6 G10 · Blunder · walked into a forced loss · J8 would have made an open
+> three (J8 H11 H9 J10)
+
+That is: what the move cost, the point that was better, what a stone there would
+have made, and the line the engine expected to follow. Where a move threw away a
+forced win the line says so. A point named anywhere in the verdict is a place to
+jump to.
+
+The grades from live play are a running commentary, snatched from a short search
+in the gap before your next move, and they are noisy for the same reason. A
+review re-reads each position with a longer search, and where it can it scores
+the move you played from the *same* search that scored the best move, so the two
+are comparable rather than two clocks stopped at different depths. The result
+replaces the game's grades and is stored with it, so a review runs once and is
+then stepped through; it goes into the JSON export too.
+
+The verdict gives each side an **accuracy**, the counts of each grade, the
+**turning point** and any **missed wins**. There is no standard for an accuracy
+number, so here is what this one is: the mean, over a side's moves, of the win
+chance each move kept. A move that dropped its player from 60% to 40% scores
+0.8, a move that gave nothing away scores 1. Win chance is Rapfi's own logistic
+of its evaluation, so the number does not depend on the eval units. The turning
+point is the single largest drop in win chance, which is a different thing from
+the worst grade: once a side is already at 4%, even a blunder cannot drop it
+far, so the turning point tends to land on the move that first let the game go
+rather than the one that finally lost it.
+
+One thing the engine cannot tell you: Rapfi resolves a won position by force and
+reports no value for it at all. The position before the winning move is exactly
+that. The record proves what it was worth - a win in one for the side to move -
+so the review fills it in, which is what lets the move that allowed it be graded.
+
+## Exporting a game
+
+**Export JSON** under the move list writes the game in progress. The same button
+in the History tab writes whichever saved game is open below it, under that game's
+own timestamp rather than the time you pressed it.
+
+The record carries the notation a person reads and the engine coordinates a tool
+wants, so it can go either way:
+
+```json
+{ "app": "rapfi-gomoku", "size": 15, "rule": "renju",
+  "opponent": "ai-white", "difficulty": "full", "result": "unfinished",
+  "moves": [
+    { "n": 3, "player": "black", "coord": "J6", "x": 9, "y": 5,
+      "eval": 62, "grade": "Inaccuracy", "best": "I8", "shape": "open two" }
+  ] }
+```
+
+`coord` is always gomoku notation and `grade` is always the plain name, whatever
+skin was on when the game was played: the file is a record, not a screenshot.
 
 ## Value map
 

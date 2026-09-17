@@ -18,10 +18,20 @@
       <button id="leftToggle" class="icon-btn" title="Hide this panel">Hide</button>
     </div>
     <ol class="movelog" id="movelog"></ol>
+    <div class="list-foot" id="movesFoot">
+      <button id="exportGame" class="icon-btn"
+              title="Save this game as JSON: the notation, the engine's evaluation and the grade for every move">Export JSON</button>
+    </div>
     <div class="history" id="history" hidden>
       <ol class="game-list" id="gameList"></ol>
       <div class="replay" id="replay" hidden>
-        <div class="replay-title" id="replayTitle"></div>
+        <div class="replay-head">
+          <div class="replay-title" id="replayTitle"></div>
+          <button id="reviewGame" class="icon-btn"
+                  title="Have the engine read every position of this game at full strength and say what each move cost, what would have been better, and what that would have made">Review</button>
+        </div>
+        <div class="review-summary" id="reviewSummary" hidden></div>
+        <div class="review-note" id="replayNote"></div>
         <ol class="movelog replay-log" id="replayLog"></ol>
         <div class="replay-actions">
           <button id="replayStart" class="btn" title="Back to the empty board">Start</button>
@@ -31,7 +41,9 @@
           <button id="replayClose" class="btn" data-sheet="Close version">Close replay</button>
         </div>
       </div>
-      <div class="history-foot">
+      <div class="list-foot history-foot">
+        <button id="exportReplay" class="icon-btn"
+                title="Save the game open below as JSON">Export JSON</button>
         <button id="historyClear" class="icon-btn">Clear history</button>
       </div>
     </div>

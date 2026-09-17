@@ -15,6 +15,7 @@
     grid: '--grid',
     gridEdge: '--grid-edge',
     label: '--coord',
+    star: '--star',
     black: '--stone-black',
     blackEdge: '--stone-black-edge',
     white: '--stone-white',
@@ -52,6 +53,7 @@
    'skin', 'favicon', 'demoControls', 'demoMatch', 'demoNote', 'demoPace',
    'demoPlay', 'demoStep', 'demoStopOnError', 'engineFold', 'keysFold',
    'tabMoves', 'tabHistory', 'history', 'gameList', 'historyClear',
+   'movesFoot', 'exportGame', 'exportReplay', 'reviewGame', 'reviewSummary', 'replayNote',
    'replay', 'replayTitle', 'replayLog', 'replayStart', 'replayPrev',
    'replayNext', 'replayEnd', 'replayClose'].forEach(function (id) {
     els[id] = document.getElementById(id);
@@ -71,6 +73,8 @@
     candidates: [],     // scored placements for the side to move
     candPending: false,
     candSeq: 0,         // stale analysis replies are dropped
+    reviewSeq: 0,       // a review that is closed under is abandoned the same way
+    reviewing: null,    // { index, done, total } while a game is being read
     grades: [],         // grades[i] describes history[i]
     prior: null,        // analysis of the position before the pending move
     forbidden: [],      // renju: cells Black may not play
@@ -173,7 +177,11 @@
       mapOn: 'Value map on', mapOff: 'Value map off',
       barOn: 'Evaluation bar on', barOff: 'Evaluation bar off',
       clear: 'Undo all', clearList: 'Clear history', clearSure: 'Clear all · sure?',
-      replay: 'Replay · '
+      replay: 'Replay · ',
+      review: 'Review', reviewing: 'Reviewing',
+      wouldMake: ' would have made ', wasForcedWin: ' was a forced win',
+      accuracy: 'accuracy', turning: 'Turning point', missed: 'Missed wins',
+      winChance: 'win chance'
     },
     sheet: {
       title: 'Q3_forecast_v7.xlsx',
@@ -185,7 +193,11 @@
       mapOn: 'Heatmap on', mapOff: 'Heatmap off',
       barOn: 'Variance bar on', barOff: 'Variance bar off',
       clear: 'Clear sheet', clearList: 'Clear versions', clearSure: 'Clear all · sure?',
-      replay: 'Version · '
+      replay: 'Version · ',
+      review: 'Audit', reviewing: 'Auditing',
+      wouldMake: ' would have made ', wasForcedWin: ' would have closed the target',
+      accuracy: 'accuracy', turning: 'Largest variance', missed: 'Missed targets',
+      winChance: 'on target'
     }
   };
 
@@ -237,6 +249,11 @@
     return isSheet() ? (SHEET_GRADE[grade] || grade) : grade;
   }
 
+  function shapeName(name) {
+    var said = shapeText({ name: name, note: '' });
+    return said ? said.name : name;
+  }
+
   /* Fixed strings swap in place, their originals kept on the node so flipping
      back needs no second table. */
   function applySkinText(on) {
@@ -268,20 +285,14 @@
     store(SKIN_KEY, state.skin);
   }
 
-  /* How a point is written in the panel, following whichever way the board is
-     currently numbering its rows. */
+  /* How a point is written down. Always the board's own notation, A-O with row
+     1 at the bottom, whichever skin is on: the move list is the game's record,
+     and a skin is paint. The sheet numbers its own headers the other way up to
+     stay convincing, so the two read differently on paper while pointing at the
+     same point - and it is the record that has to stay right. */
   function coordText(cell) {
     if (cell == null || cell < 0) return '';
-    if (!isSheet()) return G.toCoord(cell);
-    return G.COLUMNS[colOf(cell)] + (rowOf(cell) + 1);
-  }
-
-  function pvText(pv) {
-    if (!isSheet()) return pv.join(' ');
-    return pv.map(function (token) {
-      var cell = cellFromCoord(token);
-      return cell >= 0 ? coordText(cell) : token;
-    }).join(' ');
+    return G.toCoord(cell);
   }
 
 
@@ -623,6 +634,16 @@
     ctx.fillRect(0, 0, m.side, head);
     ctx.fillRect(0, 0, head, m.side);
 
+    /* The five handicap points, kept as landmarks. Every cell on a sheet looks
+       like every other one, so without them there is nothing for the eye to
+       anchor to and no way to tell at a glance where on the board you are.
+       Drawn as a tint rather than a dot because a shaded cell is a thing a
+       spreadsheet does, and a dot floating inside one is not - and painted
+       before the gridlines, so the grid still runs across them unbroken. */
+    for (i = 0; i < STAR.length; i++) {
+      fillCell(STAR[i][1] * SIZE + STAR[i][0], COLOR.star, 0.18);
+    }
+
     ctx.strokeStyle = COLOR.grid;
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -645,7 +666,26 @@
     ctx.moveTo(v, 0); ctx.lineTo(v, m.side);
     ctx.stroke();
 
-    ctx.fillStyle = COLOR.label;
+    /* A sheet says where you are twice: the outline round the cell, and the
+       row and column headers lighting up to meet it. The second is what you
+       actually read when the board is a field of identical squares, so the
+       headers follow the point under the pointer while there is one and the
+       cell just played the rest of the time. */
+    var focus = state.hover >= 0 && board.cells[state.hover] === EMPTY
+      ? state.hover
+      : (board.history.length ? board.history[board.history.length - 1] : -1);
+    var onCol = focus >= 0 ? colOf(focus) : -1;
+    var onRow = focus >= 0 ? rowOf(focus) : -1;
+
+    if (focus >= 0) {
+      ctx.save();
+      ctx.globalAlpha = 0.22;
+      ctx.fillStyle = COLOR.sheetActive;
+      ctx.fillRect(px(onCol) - m.step / 2, 0, m.step, head);
+      ctx.fillRect(0, px(onRow) - m.step / 2, head, m.step);
+      ctx.restore();
+    }
+
     ctx.font = sheetFont(0.32, '600');
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -653,7 +693,9 @@
       var mid = (edges[i] + edges[i + 1]) / 2;
       var idx = Math.round((mid - px(0)) / m.step);
       if (idx < 0 || idx >= SHEET_COLUMNS.length || mid < head) continue;
+      ctx.fillStyle = idx === onCol ? COLOR.sheetActive : COLOR.label;
       ctx.fillText(SHEET_COLUMNS[idx], mid, head / 2);
+      ctx.fillStyle = idx === onRow ? COLOR.sheetActive : COLOR.label;
       ctx.fillText(String(idx + 1), head / 2, mid);
     }
   }
@@ -730,10 +772,10 @@
       Math.round(px(SIZE - 1)) - Math.round(px(0))
     );
 
-    ctx.fillStyle = COLOR.gridEdge;
+    ctx.fillStyle = COLOR.star;
     for (i = 0; i < STAR.length; i++) {
       ctx.beginPath();
-      ctx.arc(px(STAR[i][0]), px(STAR[i][1]), Math.max(1.6, m.step * 0.055), 0, Math.PI * 2);
+      ctx.arc(px(STAR[i][0]), px(STAR[i][1]), Math.max(2, m.step * 0.075), 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -1327,6 +1369,7 @@
       clearForbidden();
       clearAnalysis();
     }
+    if (state.replay.index !== index) cancelReview();
     state.replay.index = index;
     setPly(game.moves.length);
   }
@@ -1361,6 +1404,7 @@
   function closeReplay() {
     var r = state.replay;
     if (!r) return;
+    cancelReview();
     var saved = r.saved;
     state.replay = null;
 
@@ -1402,6 +1446,97 @@
     render();
   }
 
+  /* ---- exporting a record ------------------------------------------------
+     The game written out rather than drawn: the notation a person reads, the
+     engine coordinates a tool wants, and what the engine made of each move.
+     Same shape whether it comes from the game in progress or one out of the
+     history, so whatever is on screen is what lands in the file. */
+
+  function sideName(player) { return player === BLACK ? 'black' : 'white'; }
+
+  function gameRecord(moves, grades, shapes, meta) {
+    return {
+      app: 'rapfi-gomoku',
+      savedAt: new Date().toISOString(),
+      size: SIZE,
+      rule: meta.rule,
+      opponent: meta.mode,
+      difficulty: meta.difficulty || null,
+      result: meta.result,
+      moves: moves.map(function (cell, i) {
+        var point = toEngine(cell);
+        var grade = grades ? grades[i] : null;
+        var shape = shapes ? shapes[i] : null;
+        var row = {
+          n: i + 1,
+          player: sideName(playerAt(i)),
+          coord: G.toCoord(cell),      // the record, never the skin's wording
+          x: point.x,
+          y: point.y
+        };
+        if (grade) {
+          row.eval = grade.value;
+          row.grade = grade.grade;
+          if (grade.bestCell >= 0 && grade.bestCell !== cell) {
+            row.best = G.toCoord(grade.bestCell);
+          }
+          if (grade.bestShape) row.bestMakes = grade.bestShape;
+          if (grade.bestLine) row.bestLine = grade.bestLine;
+          if (grade.missedWin) row.missedWin = true;
+          if (grade.winBefore != null) {
+            row.winBefore = Math.round(grade.winBefore * 1000) / 1000;
+            row.winAfter = Math.round(grade.winAfter * 1000) / 1000;
+          }
+        }
+        if (shape) row.shape = shape.name;
+        return row;
+      })
+    };
+  }
+
+  /* A replay has the board, so the game in progress is whatever it put aside. */
+  function liveRecord() {
+    var live = isReplaying() ? state.replay.saved : state;
+    var moves = isReplaying() ? state.replay.saved.moves : board.history;
+    return gameRecord(moves, live.grades, live.shapes, {
+      rule: els.rule.value,
+      mode: els.mode.value,
+      difficulty: els.difficulty.value,
+      result: live.over ? (live.winner ? sideName(live.winner) : 'draw') : 'unfinished'
+    });
+  }
+
+  function savedRecord(game) {
+    var record = gameRecord(game.moves, game.grades, null, {
+      rule: game.rule,
+      mode: game.mode,
+      difficulty: null,
+      result: game.winner ? sideName(game.winner) : 'draw'
+    });
+    if (game.review) record.review = game.review;
+    return record;
+  }
+
+  function recordName(at) {
+    var d = at ? new Date(at) : new Date();
+    var pad = function (n) { return (n < 10 ? '0' : '') + n; };
+    return 'gomoku-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) +
+           '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+  }
+
+  function downloadJson(name, data) {
+    var url = URL.createObjectURL(
+      new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+    var link = document.createElement('a');
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    // Some browsers cancel the download if the URL goes away too soon.
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 1000);
+  }
+
   /* One row per move, shared by the live log and the replay log. `current` is
      the move being shown, 1-based; anything after it is still to come. */
   function movelogHtml(moves, grades, current) {
@@ -1427,6 +1562,10 @@
     var on = state.tab === 'history';
     els.history.hidden = !on;
     els.movelog.hidden = on;
+    els.movesFoot.hidden = on;
+    els.exportGame.disabled =
+      !(isReplaying() ? state.replay.saved.moves : board.history).length;
+    els.exportReplay.disabled = !isReplaying();
     els.tabMoves.setAttribute('aria-selected', on ? 'false' : 'true');
     els.tabHistory.setAttribute('aria-selected', on ? 'true' : 'false');
     if (!on) return;
@@ -1456,8 +1595,18 @@
     els.replay.hidden = !game;
     if (!game) return;
 
-    els.replayTitle.textContent = resultText(game) + ' · move ' + r.ply +
-                                  ' of ' + game.moves.length;
+    els.replayTitle.textContent = resultText(game) + ' · ' + L('unit').toLowerCase() +
+                                  ' ' + r.ply + ' of ' + game.moves.length;
+
+    var rv = state.reviewing;
+    els.reviewGame.disabled = backend.kind !== 'rapfi' || !!rv;
+    els.reviewGame.textContent = rv
+      ? L('reviewing') + ' ' + rv.done + '/' + rv.total
+      : L('review');
+    els.reviewSummary.innerHTML = reviewSummaryHtml(game);
+    els.reviewSummary.hidden = !game.review;
+    els.replayNote.innerHTML = reviewText(game.moves, game.grades || [], r.ply - 1, true);
+
     els.replayLog.innerHTML = movelogHtml(game.moves, game.grades, r.ply);
     var row = els.replayLog.querySelector ? els.replayLog.querySelector('li.last') : null;
     if (row) {
@@ -1538,26 +1687,7 @@
       if (seq !== state.candSeq) return;           // the board moved on
       if (data.error) throw new Error(data.error);
 
-      var list = (data.candidates || []).map(function (c) {
-        return {
-          cell: cellFromCoord(c.pv && c.pv[0]),
-          score: c.eval,
-          value: evalToNumber(c.eval),
-          depth: c.depth,
-          pv: c.pv || []
-        };
-      }).filter(function (c) { return c.cell >= 0 && board.cells[c.cell] === EMPTY; });
-
-      list.sort(function (a, b) { return b.value - a.value; });
-
-      // A forced position can come back with a move but no ranked list.
-      if (!list.length && data.best) {
-        var cell = fromEngine(data.best.x, data.best.y);
-        if (cell >= 0 && board.cells[cell] === EMPTY) {
-          list = [{ cell: cell, score: '', value: 0, depth: '', pv: [] }];
-        }
-      }
-
+      var list = candidateList(data);
       var positionValue = data.info && data.info.eval != null
         ? evalToNumber(data.info.eval) : null;
 
@@ -1584,22 +1714,287 @@
     });
   }
 
-  function renderReview() {
-    var i = board.history.length - 1;
-    var g = i >= 0 ? state.grades[i] : null;
-    if (!g) { els.review.textContent = ''; return; }
-    var played = coordText(board.history[i]);
-    var text = L('unit') + ' ' + (i + 1) + ' ' + played + ' · ' + gradeText(g.grade);
-    if (g.grade !== 'Best') {
-      // A move that turns a playable position into a lost one shows a loss on
-      // the mate scale, six digits of it, which says nothing. Name it instead.
-      text += g.loss >= 1e5 ? ' · walked into a forced loss'
-                            : ' · gave up ' + Math.round(g.loss);
-      if (g.bestCell >= 0 && g.bestCell !== board.history[i]) {
-        text += ' · best was ' + coordText(g.bestCell);
+  /* Rapfi's ranked list as cells, best first, for whatever position is on the
+     board. A forced position can come back with a move but no ranked list. */
+  function candidateList(data) {
+    var list = (data.candidates || []).map(function (c) {
+      return {
+        cell: cellFromCoord(c.pv && c.pv[0]),
+        score: c.eval,
+        value: evalToNumber(c.eval),
+        depth: c.depth,
+        pv: c.pv || []
+      };
+    }).filter(function (c) { return c.cell >= 0 && board.cells[c.cell] === EMPTY; });
+    list.sort(function (a, b) { return b.value - a.value; });
+    if (!list.length && data.best) {
+      var cell = fromEngine(data.best.x, data.best.y);
+      if (cell >= 0 && board.cells[cell] === EMPTY) {
+        list = [{ cell: cell, score: '', value: 0, depth: '', pv: [] }];
       }
     }
-    els.review.textContent = text;
+    return list;
+  }
+
+  /* ---- game review ---------------------------------------------------------
+     The engine reading a finished game back, the way a coach would: every
+     position at full strength, and for every move what it cost, what would
+     have been better, and what that would have made.
+
+     The grades from live play are a running commentary, snatched from a short
+     search in the gap before the next move, and they are noisy for the same
+     reason. A review re-reads each position with a longer search and, where it
+     can, scores the move actually played from the same search that scored the
+     best one, so the two are comparable rather than two clocks stopped at
+     different depths. The result replaces the game's grades and is stored with
+     it, so a review is run once and then stepped through.
+
+     The board walks through the game as it goes. That is not decoration: each
+     position has to be on the board anyway for the engine to be asked about
+     it, and for the shape a better move would have made to be worked out. */
+
+  var REVIEW_MS = 800;
+  var REVIEW_COUNT = 5;
+
+  /* "would have made a four-three" is worth saying; "would have made a quiet
+     move" is not, and for those the line falls back to naming the point. */
+  var THREATS = ['five in a row', 'open four', 'double four', 'four-three',
+                 'double three', 'four', 'open three', 'closed three'];
+
+  /* What a stone at `cell` would make, without leaving it there. */
+  function wouldMake(cell, player) {
+    if (cell < 0 || board.cells[cell] !== EMPTY) return null;
+    board.cells[cell] = player;
+    var shape = describeMove(cell, player);
+    board.cells[cell] = EMPTY;
+    return shape;
+  }
+
+  function analyzeAt(sideToMove, count, timeoutMs) {
+    return fetch('api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        size: SIZE,
+        rule: els.rule.value,
+        stones: stonesForEngine(),
+        sideToMove: sideToMove,
+        timeoutMs: timeoutMs,
+        count: count
+      })
+    }).then(function (r) { return r.json(); }).then(function (data) {
+      if (data.error) throw new Error(data.error);
+      var list = candidateList(data);
+      var value = data.info && data.info.eval != null ? evalToNumber(data.info.eval) : null;
+      // The value of a position is the value of its best move, so when the
+      // summary line is missing but the ranked list is not, the list will do.
+      if (value === null && list.length && list[0].score !== '') value = list[0].value;
+      return { value: value, list: list };
+    });
+  }
+
+  function cancelReview() {
+    state.reviewSeq++;
+    state.reviewing = null;
+  }
+
+  /* The grade for move `index`, from the reading of the position before it
+     (`prior`) and the reading of the position after (`now`). `winner` is set
+     only for the final move of a decided game, which needs no second reading:
+     it made five. */
+  function gradeReviewed(moves, index, prior, now, winner) {
+    var played = moves[index], mover = playerAt(index);
+    // The move that made five is the best move there is, whatever the search
+    // managed to say about the position before it.
+    if (winner && winner === mover) {
+      return {
+        value: 999999, loss: 0, bestCell: played, grade: 'Best',
+        winBefore: prior && prior.value !== null ? winRateFor(prior.value) : 1, winAfter: 1
+      };
+    }
+    if (!prior || prior.value === null) return null;
+    var before = prior.value, after, i;
+
+    var same = null;
+    for (i = 0; i < prior.list.length; i++) {
+      if (prior.list[i].cell === played && prior.list[i].score !== '') same = prior.list[i];
+    }
+    if (winner) after = winner === mover ? 999999 : -999999;
+    else if (same) after = same.value;               // same search as the best move
+    else if (now && now.value !== null) after = -now.value;
+    else return null;
+
+    var loss = Math.max(0, before - after);
+    var bestCell = prior.list.length ? prior.list[0].cell : -1;
+    var playedBest = bestCell === played;
+    var grade = {
+      value: after,
+      loss: loss,
+      bestCell: bestCell,
+      grade: playedBest ? 'Best' : gradeFor(loss),
+      winBefore: winRateFor(before),
+      winAfter: winRateFor(after)
+    };
+    if (before >= 1e5 && after < 1e5) grade.missedWin = true;
+    if (!playedBest && bestCell >= 0 && (grade.grade !== 'Good' || grade.missedWin)) {
+      if (prior.bestShape && THREATS.indexOf(prior.bestShape.name) >= 0) {
+        grade.bestShape = prior.bestShape.name;
+      }
+      var pv = prior.list[0].pv;
+      if (pv && pv.length > 1) grade.bestLine = pv.slice(0, 4);
+    }
+    return grade;
+  }
+
+  /* The verdict on the whole game. Accuracy is the mean, over a side's moves,
+     of the win chance each move kept: a move that dropped its player from 60%
+     to 40% scores 0.8, a move that gave nothing away scores 1. Win chance is
+     Rapfi's own logistic of its evaluation, so this is scale-free and does
+     not depend on the eval units. There is no standard for this number; that
+     is what it is here. */
+  function summarise(game, grades) {
+    var drops = { 1: [], 2: [] }, counts = { 1: {}, 2: {} };
+    var worst = null, missed = [];
+    for (var i = 0; i < game.moves.length; i++) {
+      var g = grades[i];
+      if (!g) continue;
+      var side = playerAt(i);
+      var drop = Math.max(0, (g.winBefore || 0) - (g.winAfter || 0));
+      drops[side].push(drop);
+      counts[side][g.grade] = (counts[side][g.grade] || 0) + 1;
+      if (!worst || drop > worst.drop) {
+        worst = { ply: i + 1, side: side, drop: drop, from: g.winBefore, to: g.winAfter };
+      }
+      if (g.missedWin) missed.push({ ply: i + 1, cell: g.bestCell });
+    }
+    function accuracy(list) {
+      if (!list.length) return null;
+      var kept = 0;
+      for (var k = 0; k < list.length; k++) kept += 1 - list[k];
+      return Math.round(100 * kept / list.length);
+    }
+    return {
+      at: Date.now(),
+      accuracy: { black: accuracy(drops[1]), white: accuracy(drops[2]) },
+      counts: { black: counts[1], white: counts[2] },
+      turning: worst && worst.drop >= 0.15 ? worst : null,
+      missed: missed.slice(0, 6)
+    };
+  }
+
+  function reviewGame(index) {
+    var game = state.games[index];
+    if (!game || backend.kind !== 'rapfi' || state.reviewing) return;
+    if (!isReplaying() || state.replay.index !== index) openReplay(index);
+    if (!isReplaying()) return;
+
+    var seq = ++state.reviewSeq;
+    var moves = game.moves, total = moves.length;
+    var grades = [], prior = null;
+    state.reviewing = { index: index, done: 0, total: total };
+
+    function stale() {
+      return seq !== state.reviewSeq || !isReplaying() || state.replay.index !== index;
+    }
+
+    function step(i) {
+      if (stale()) return;
+      setPly(i);
+      state.reviewing.done = i;
+      render();
+
+      var mover = playerAt(i);
+      var decided = i === total;
+      var read = decided ? Promise.resolve(null) : analyzeAt(mover, REVIEW_COUNT, REVIEW_MS);
+      read.then(function (now) {
+        if (stale()) return;
+        /* Rapfi resolves a won position by force and reports no value for it
+           at all. The position before the winning move is exactly that, and
+           the record proves what it was worth: a win in one for the side to
+           move. Filling it in is what lets the move that allowed it be graded. */
+        if (now && now.value === null && game.winner && i === total - 1 && mover === game.winner) {
+          now.value = 999999;
+        }
+        if (i > 0) grades[i - 1] = gradeReviewed(moves, i - 1, prior, now, decided ? game.winner : 0);
+        if (now) now.bestShape = now.list.length ? wouldMake(now.list[0].cell, mover) : null;
+        prior = now;
+        if (i < total) step(i + 1); else finish();
+      }, function () {
+        // One search failing loses one grade, not the review.
+        if (stale()) return;
+        prior = null;
+        if (i < total) step(i + 1); else finish();
+      });
+    }
+
+    function finish() {
+      game.grades = grades;
+      game.review = summarise(game, grades);
+      state.reviewing = null;
+      saveGames();
+      setPly(state.replay.ply);
+    }
+
+    step(0);
+  }
+
+  /* What the review has to say about the move being shown, as one line. Shared
+     by the live review line and the note above the replay log. */
+  function reviewText(moves, grades, index, asHtml) {
+    var g = index >= 0 ? grades[index] : null;
+    if (!g) return '';
+    var played = coordText(moves[index]);
+    var strong = function (t) { return asHtml ? '<b>' + t + '</b>' : t; };
+    var text = L('unit') + ' ' + (index + 1) + ' ' + strong(played) + ' · ' + gradeText(g.grade);
+    if (g.grade === 'Best') return text;
+
+    // A move that turns a playable position into a lost one shows a loss on
+    // the mate scale, six digits of it, which says nothing. Name it instead.
+    text += g.loss >= 1e5 ? ' · walked into a forced loss'
+                          : ' · gave up ' + Math.round(g.loss);
+
+    var alt = g.bestCell >= 0 && g.bestCell !== moves[index] ? coordText(g.bestCell) : '';
+    if (alt) {
+      if (g.missedWin) text += ' · ' + strong(alt) + L('wasForcedWin');
+      else if (g.bestShape) text += ' · ' + strong(alt) + L('wouldMake') + shapeName(g.bestShape);
+      else text += ' · best was ' + strong(alt);
+      if (g.bestLine && g.bestLine.length > 1) text += ' (' + g.bestLine.join(' ') + ')';
+    }
+    return text;
+  }
+
+  function reviewSummaryHtml(game) {
+    var rv = game.review;
+    if (!rv) return '';
+    var line = function (side, key) {
+      var c = rv.counts[key] || {}, parts = [];
+      ['Best', 'Good', 'Inaccuracy', 'Mistake', 'Blunder'].forEach(function (grade) {
+        if (c[grade]) parts.push(c[grade] + ' ' + gradeText(grade).toLowerCase());
+      });
+      var acc = rv.accuracy[key];
+      return '<div><b>' + name(side) + '</b> <span class="acc">' +
+             (acc === null ? '–' : acc + '%') + '</span> ' + L('accuracy') +
+             (parts.length ? ' · ' + parts.join(', ') : '') + '</div>';
+    };
+    var html = line(BLACK, 'black') + line(WHITE, 'white');
+    if (rv.turning) {
+      var t = rv.turning;
+      html += '<div>' + L('turning') + ': <span data-ply="' + t.ply + '">' +
+              L('unit').toLowerCase() + ' ' + t.ply + '</span>, ' + name(t.side) +
+              ' ' + coordText(game.moves[t.ply - 1]) + ' — ' + L('winChance') + ' ' +
+              Math.round(t.from * 100) + '% → ' + Math.round(t.to * 100) + '%</div>';
+    }
+    if (rv.missed.length) {
+      html += '<div>' + L('missed') + ': ' + rv.missed.map(function (m) {
+        return '<span data-ply="' + m.ply + '">' + L('unit').toLowerCase() + ' ' + m.ply +
+               '</span> (' + coordText(m.cell) + ')';
+      }).join(', ') + '</div>';
+    }
+    return html;
+  }
+
+  function renderReview() {
+    els.review.textContent = reviewText(board.history, state.grades, board.history.length - 1, false);
   }
 
   function renderCandidates() {
@@ -1770,7 +2165,7 @@
     if (info.eval) els.anEval.textContent = info.eval;
     if (info.nodes) els.anNodes.textContent = info.nodes;
     if (info.speed) els.anSpeed.textContent = info.speed;
-    if (info.pv && info.pv.length) els.anPv.textContent = pvText(info.pv);
+    if (info.pv && info.pv.length) els.anPv.textContent = info.pv.join(' ');
   }
 
   /* Rapfi prints search progress as
@@ -1899,6 +2294,7 @@
   }
 
   function newGame() {
+    cancelReview();
     clearDemoTimer();
     state.demoPaused = false;
     state.stoppedAt = -1;
@@ -2270,6 +2666,26 @@
     if (state.replay) setPly(state.games[state.replay.index].moves.length);
   });
   els.replayClose.addEventListener('click', closeReplay);
+
+  els.reviewGame.addEventListener('click', function () {
+    if (isReplaying()) reviewGame(state.replay.index);
+  });
+
+  /* A move named in the verdict is a place to jump to. */
+  els.reviewSummary.addEventListener('click', function (e) {
+    var at = e.target.closest ? e.target.closest('[data-ply]') : null;
+    if (at && isReplaying()) setPly(Number(at.getAttribute('data-ply')));
+  });
+
+  els.exportGame.addEventListener('click', function () {
+    downloadJson(recordName(), liveRecord());
+  });
+
+  els.exportReplay.addEventListener('click', function () {
+    if (!isReplaying()) return;
+    var game = state.games[state.replay.index];
+    if (game) downloadJson(recordName(game.at), savedRecord(game));
+  });
 
   els.historyClear.addEventListener('click', function () {
     if (!clearArmed) { armClear(true); return; }

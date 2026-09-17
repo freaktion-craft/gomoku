@@ -27,6 +27,9 @@
   --grid: #9b978e;
   --grid-edge: #6f6b63;
   --coord: #8a867e;
+  /* The five handicap points, cooler than the grid so they read as landmarks
+     at a glance rather than as heavier crossings. */
+  --star: #5a6675;
   --stone-black: #17171a;
   --stone-black-edge: #17171a;
   --stone-white: #fbfbf9;
@@ -62,6 +65,7 @@
     --grid: #4d4d55;
     --grid-edge: #74747d;
     --coord: #82828a;
+    --star: #8d99b0;
     --stone-black: #0c0c0f;
     --stone-black-edge: #56565e;
     --stone-white: #e4e4de;
@@ -89,6 +93,7 @@
   --grid: #4d4d55;
   --grid-edge: #74747d;
   --coord: #82828a;
+  --star: #8d99b0;
   --stone-black: #0c0c0f;
   --stone-black-edge: #56565e;
   --stone-white: #e4e4de;
@@ -119,6 +124,7 @@
   --grid: #e0e2e5;
   --grid-edge: #c3c6ca;
   --coord: #5f6368;
+  --star: #7d8794;
   --stone-black: #1a56b8;
   --stone-black-edge: #1a56b8;
   --stone-white: #c5221f;
@@ -533,11 +539,58 @@ body {
 
 .replay-actions .btn { padding: 5px 6px; font-size: 12px; }
 
-.history-foot {
+.list-foot {
   display: flex;
   justify-content: flex-end;
+  gap: 6px;
   flex: none;
 }
+
+.list-foot[hidden] { display: none; }
+
+/* The review sits above the replay log: a verdict on the game, then a line
+   for whichever move is being shown. Anything with a move number in it is a
+   place to jump to. */
+.replay-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex: none;
+}
+
+.review-summary {
+  flex: none;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  padding: 7px 9px;
+}
+
+.review-summary[hidden] { display: none; }
+.review-summary b { color: var(--text); font-weight: 600; }
+.review-summary .acc { font-variant-numeric: tabular-nums; }
+
+.review-summary [data-ply] {
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 2px;
+}
+
+.review-summary [data-ply]:hover { color: var(--text); }
+
+.review-note {
+  flex: none;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-dim);
+  min-height: 1.45em;
+}
+
+.review-note:empty { display: none; }
+.review-note b { color: var(--text); font-weight: 600; }
 
 /* Moves still to come in the game being replayed. */
 .movelog li.ahead { opacity: 0.4; }
