@@ -132,7 +132,7 @@ an Intel Mac has to build Rapfi from source or fall back to `local-engine.js`.
 | | |
 |---|---|
 | Opponent | which colour Rapfi plays, two-player hotseat, or tactics |
-| Difficulty | how close to its best move the engine will settle for; see below |
+| Difficulty | a 0-100 dial from "Longer game" to "Shortest win", with the named levels as ticks; see below |
 | Rule | renju (the default), freestyle (five or more), or standard (exactly five) |
 | Board | 19 × 19 (the default) or 15 × 15; changing it starts a new game |
 | Score my options | rank the best placements for the side to move, with an evaluation on each |
@@ -390,21 +390,35 @@ blank, because Rapfi returns no evaluation before the first stone.
 
 ## Difficulty
 
-The ladder is built two different ways, because one way does not reach the
-bottom of it.
+Difficulty is a dial from 0 to 100, and a style as much as a strength. The low
+end, "Longer game", plays long games with small mistakes along the way. The high
+end, "Shortest win", plays the shortest way to win. As White in a lost renju
+position it also sets forbidden-point traps (from Strong up). The named levels
+are clickable points on the dial, and each plays exactly as its old menu entry
+did.
 
-**Club and above are Rapfi**, handicapped by a `window`: how far below its own
-best move, in Rapfi's eval units, the move it plays may be. Every level searches
-at full strength for a real length of time; the window only decides which of
-what it found it settles for.
+The dial is built two different ways, because one way does not reach the bottom
+of it.
 
-| Difficulty | mechanism | think time |
-|---|---|---|
-| Beginner | perception table | 0.3 s |
-| Casual | perception table | 0.3 s |
-| Club | window 400 | 0.5 s |
-| Strong | window 100 | 0.8 s |
-| Full | window 0 — always the best move | 1.5 s |
+**From 30 up it is Rapfi**, handicapped by a `window`: how far below its own
+best move, in Rapfi's eval units, the move it plays may be. Every setting
+searches at full strength for a real length of time; the window only decides
+which of what it found it settles for. Between the named points the window and
+the think time are interpolated, so turning the dial up never makes it weaker.
+
+| Dial | Level | mechanism | think time |
+|---|---|---|---|
+| 0 | Beginner | perception table | 0.3 s |
+| 1-19 | | perception table, Beginner's blended towards Casual's | 0.3 s |
+| 20 | Casual | perception table | 0.3 s |
+| 30 | | window 2500 | 0.5 s |
+| 60 | Club | window 400 | 0.5 s |
+| 80 | Strong | window 100, forbidden-point traps as White | 0.8 s |
+| 100 | Full | window 0, always the best move, traps as White | 1.5 s |
+
+The window cannot throw a decided position away, which is what keeps the
+mistakes non-critical: when a four has to be blocked, every other reply is worse
+by thousands, so the block is the only move inside the window.
 
 ### Why a window cannot make a beginner
 
@@ -547,7 +561,7 @@ wants, so it can go either way:
 
 ```json
 { "app": "rapfi-gomoku", "size": 19, "rule": "renju",
-  "opponent": "ai-white", "difficulty": "full", "result": "unfinished",
+  "opponent": "ai-white", "difficulty": 100, "result": "unfinished",
   "moves": [
     { "n": 3, "player": "black", "coord": "J6", "x": 9, "y": 5,
       "eval": 62, "grade": "Inaccuracy", "best": "I8", "shape": "open two" }

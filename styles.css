@@ -762,6 +762,56 @@ select:focus-visible, .btn:focus-visible {
 
 .btn.holding:hover { background-color: var(--surface); }
 
+/* The Difficulty dial: a slider with the named levels as clickable ticks under it,
+   and the two ends of the style it runs between. */
+.dial-value {
+  float: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-dim);
+}
+
+#difficulty {
+  width: 100%;
+  margin: 4px 0 0;
+  accent-color: var(--accent);
+}
+
+/* Two rows, because Beginner and Casual sit a fifth of the dial apart, which on a
+   panel this narrow is less than one label's width. */
+.dial-ticks {
+  position: relative;
+  height: 30px;
+  margin: 0 8px;
+}
+
+.dial-tick:nth-child(even) { top: 14px; }
+
+.dial-tick {
+  position: absolute;
+  transform: translateX(-50%);
+  padding: 0 2px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--text-dim);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dial-tick:first-child { transform: none; }
+.dial-tick:last-child { transform: translateX(-100%); }
+.dial-tick:hover, .dial-tick.current { color: var(--text); }
+.dial-tick:disabled { cursor: default; color: var(--text-dim); }
+
+.dial-ends {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
 /* A line under a control saying what the setting actually does. */
 .hint-note {
   margin: 0;

@@ -47,7 +47,7 @@
   var canvas = document.getElementById('board');
   var ctx = canvas.getContext('2d');
   var els = {};
-  ['statusText', 'statusMeta', 'turnDot', 'engineBadge', 'mode', 'difficulty', 'difficultyNote',
+  ['statusText', 'statusMeta', 'turnDot', 'engineBadge', 'mode', 'difficulty', 'difficultyNote', 'difficultyValue', 'difficultyTicks',
    'rule', 'newGame', 'undo', 'undoAll', 'hint', 'valueMap', 'movelog', 'analysis',
    'anDepth', 'anEval', 'anNodes', 'anSpeed', 'anPv', 'nbest', 'candList',
    'review', 'theme', 'renjuOption', 'coachPhase', 'coachNote',
@@ -214,7 +214,7 @@
   function demoNoteText() {
     var m = matchup();
     if (m) return MATCH_NOTE[els.demoMatch.value] || '';
-    if (els.difficulty.value === 'full') {
+    if (difficulty().value === 100) {
       return 'Two perfect players trade a balanced game with nothing to punish. ' +
              'Pick a lower Difficulty, or one of the matchups above.';
     }
@@ -304,18 +304,67 @@
      choice still shows a loss near 100 because two searches stop at different
      depths, and the tenth-best move in a balanced position costs about 430. */
 
-  /* `sees` is a perception table: what the side reads each shape as being
-     worth, against what it is worth. `window` is the eval slack a Rapfi level
-     will settle for. A level uses one or the other, never both. */
-  var DIFFICULTY = {
-    beginner: { sees: { openFour: 0.05, openThree: 0.25, closedThree: 0.40, openTwo: 0.6 },
-                depth: 1, timeoutMs: 300 },
-    casual:   { sees: { openFour: 0.10, openThree: 0.45, closedThree: 0.60, openTwo: 0.8 },
-                depth: 1, timeoutMs: 300 },
-    club:     { window: 400, timeoutMs: 500,  depth: 3 },
-    strong:   { window: 100, timeoutMs: 800,  depth: 4 },
-    full:     { window: 0,   timeoutMs: 1500, depth: 6 }
+  /* The dial runs from 0 to 100 and is also a style axis. The low end plays longer
+     games full of small, non-critical mistakes; the high end plays the shortest way to
+     win, and as White in a lost renju position sets forbidden-point traps
+     (white-resistance.js on the bridge). The named levels are points on it.
+
+     From 30 up it is Rapfi with a `window`: how far below its own best move, in eval
+     units, the move it plays may be. Between the named points the window and the move
+     time are interpolated, so the dial is monotone and a named level plays exactly as it
+     did when it was a menu entry. A window never throws away a decided position, which
+     is what keeps the mistakes non-critical: when a four has to be blocked every other
+     reply is worse by thousands, so only the block is inside it.
+
+     Below 30 it is the bundled engine reading shapes through a perception table,
+     blended from Beginner's at 0 to Casual's at 20 and above.
+
+     `sees` is a perception table: what the side reads each shape as being worth, against
+     what it is worth. A level uses a window or a table, never both. */
+  var PERCEPTION = {
+    beginner: { openFour: 0.05, openThree: 0.25, closedThree: 0.40, openTwo: 0.6 },
+    casual:   { openFour: 0.10, openThree: 0.45, closedThree: 0.60, openTwo: 0.8 }
   };
+
+  // [dial value, window, move time in ms, bundled-engine depth]
+  var WINDOW_POINTS = [
+    [30, 2500, 500, 3],
+    [60, 400, 500, 3],     // Club
+    [80, 100, 800, 4],     // Strong
+    [100, 0, 1500, 6]      // Full
+  ];
+
+  var TICKS = { beginner: 0, casual: 20, club: 60, strong: 80, full: 100 };
+
+  // The trap policy is part of the ruthless end of the style.
+  var RESIST_FROM = TICKS.strong;
+
+  function levelAt(value) {
+    var v = Math.max(0, Math.min(100, Math.round(Number(value))));
+    if (!Number.isFinite(v)) v = 100;
+    if (v < WINDOW_POINTS[0][0]) {
+      var t = Math.min(1, v / TICKS.casual), sees = {};
+      for (var key in PERCEPTION.beginner) {
+        sees[key] = PERCEPTION.beginner[key] + t * (PERCEPTION.casual[key] - PERCEPTION.beginner[key]);
+      }
+      return { value: v, sees: sees, depth: 1, timeoutMs: 300 };
+    }
+    var i = 1;
+    while (i < WINDOW_POINTS.length - 1 && v > WINDOW_POINTS[i][0]) i++;
+    var a = WINDOW_POINTS[i - 1], b = WINDOW_POINTS[i];
+    var f = (v - a[0]) / (b[0] - a[0]);
+    return {
+      value: v,
+      window: Math.round(a[1] + f * (b[1] - a[1])),
+      timeoutMs: Math.round(a[2] + f * (b[2] - a[2])),
+      depth: Math.round(a[3] + f * (b[3] - a[3])),
+      resist: v >= RESIST_FROM
+    };
+  }
+
+  // The named levels, for the sparring matchups.
+  var DIFFICULTY = {};
+  for (var tickName in TICKS) DIFFICULTY[tickName] = levelAt(TICKS[tickName]);
 
   /* Said plainly under the control, because "weaker" here does not mean what it
      usually means: the engine is not thinking less, it is settling for less. */
@@ -323,14 +372,23 @@
     beginner: 'Answers a four, but walks straight past an open three.',
     casual:   'Answers a four, and spots about half the open threes.',
     club:     'Answers everything, and takes the second-best line often enough.',
-    strong:   'Answers everything, and is rarely off the best move.',
-    full:     'Always plays the best move it finds.'
+    strong:   'Answers everything, is rarely off the best move, and sets forbidden-point traps when lost as White.',
+    full:     'Plays the shortest way to win, and sets forbidden-point traps when lost as White.'
   };
+
+  function difficultyNote(value) {
+    for (var name in TICKS) if (TICKS[name] === value) return DIFFICULTY_NOTE[name];
+    var level = levelAt(value);
+    if (level.sees && value >= TICKS.casual) return DIFFICULTY_NOTE.casual;
+    if (level.sees) return 'Answers a four, and spots some of the open threes: more of them towards Casual.';
+    return 'Answers everything, and settles for a move up to ' + level.window +
+      ' below its best' + (level.resist ? '; sets forbidden-point traps when lost as White.' : '.');
+  }
 
   var ANALYSIS_MS = 1000;
 
   function difficulty() {
-    return DIFFICULTY[els.difficulty.value] || DIFFICULTY.full;
+    return levelAt(els.difficulty.value);
   }
 
   /* Rapfi if server.js answers, otherwise the bundled engine. */
@@ -646,7 +704,7 @@
     });
   }
 
-  function askRapfi(color, timeoutMs, window) {
+  function askRapfi(color, timeoutMs, window, resist) {
     return fetch('api/move', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -656,7 +714,8 @@
         stones: stonesForEngine(),
         engineColor: color,
         timeoutMs: timeoutMs,
-        window: window
+        window: window,
+        resist: !!resist
       })
     }).then(function (r) { return r.json(); }).then(function (data) {
       if (data.error) throw new Error(data.error);
@@ -723,7 +782,7 @@
     var d = levelFor(color);
     if (d.sees) return askNovice(color, d);
     if (backend.kind !== 'rapfi') return askLocal(color, d);
-    return askRapfi(color, d.timeoutMs, d.window).catch(function (err) {
+    return askRapfi(color, d.timeoutMs, d.window, d.resist).catch(function (err) {
       // Rapfi went away mid-game: keep playing rather than stranding the user.
       setBackend({ kind: 'local', label: 'Built-in engine (Rapfi unreachable)' });
       return askLocal(color, d);
@@ -1227,7 +1286,7 @@
       size: isReplaying() ? state.replay.saved.size : SIZE,
       rule: els.rule.value,
       mode: els.mode.value,
-      difficulty: els.difficulty.value,
+      difficulty: difficulty().value,
       result: live.over ? (live.winner ? sideName(live.winner) : 'draw') : 'unfinished'
     });
   }
@@ -2332,10 +2391,17 @@
     // nothing to say and should not look as though it does.
     var dialIdle = isDemo() && !!matchup();
     els.difficulty.disabled = dialIdle;
+    var dialValue = difficulty().value;
+    els.difficultyValue.textContent = dialValue;
+    var ticks = els.difficultyTicks.querySelectorAll('.dial-tick');
+    for (var ti = 0; ti < ticks.length; ti++) {
+      ticks[ti].disabled = dialIdle;
+      ticks[ti].classList.toggle('current', Number(ticks[ti].getAttribute('data-value')) === dialValue);
+    }
     els.difficultyNote.textContent = dialIdle
       ? 'Not used while the matchup above sets both sides.'
       : (backend.kind === 'rapfi'
-        ? DIFFICULTY_NOTE[els.difficulty.value]
+        ? difficultyNote(difficulty().value)
         : 'Without Rapfi the built-in engine approximates this by search depth.');
     els.valueMap.textContent = state.valueMapOn ? 'Value map on' : 'Value map off';
     els.valueMap.setAttribute('aria-pressed', state.valueMapOn ? 'true' : 'false');
@@ -2561,7 +2627,17 @@
   els.panelTab.addEventListener('click', function () { setPanelOpen(true); });
   els.leftToggle.addEventListener('click', function () { setLeftOpen(false); });
   els.leftTab.addEventListener('click', function () { setLeftOpen(true); });
+  // Dragging updates the number and the note as it goes; the setting is kept on release.
+  els.difficulty.addEventListener('input', render);
   els.difficulty.addEventListener('change', function () {
+    store(DIFFICULTY_KEY, els.difficulty.value);
+    state.hint = -1;
+    render();
+  });
+  els.difficultyTicks.addEventListener('click', function (e) {
+    var tick = e.target.closest ? e.target.closest('.dial-tick') : null;
+    if (!tick || els.difficulty.disabled) return;
+    els.difficulty.value = tick.getAttribute('data-value');
     store(DIFFICULTY_KEY, els.difficulty.value);
     state.hint = -1;
     render();
@@ -2701,7 +2777,12 @@
   initTheme();
   state.evalBarOn = recall(EVALBAR_KEY) !== 'off';
   state.valueMapOn = recall(VALUEMAP_KEY) === 'on';
-  if (DIFFICULTY[recall(DIFFICULTY_KEY)]) els.difficulty.value = recall(DIFFICULTY_KEY);
+  // Settings saved before the dial hold a level name; those map to their tick.
+  var savedDifficulty = recall(DIFFICULTY_KEY);
+  if (savedDifficulty in TICKS) els.difficulty.value = TICKS[savedDifficulty];
+  else if (savedDifficulty !== null && Number.isFinite(Number(savedDifficulty))) {
+    els.difficulty.value = levelAt(savedDifficulty).value;
+  }
   state.stopOnError = recall(STOPERR_KEY) !== 'off';
   var folds = (recall(FOLD_KEY) || '').split(',');
   els.engineFold.open = folds.indexOf('engine') >= 0;

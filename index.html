@@ -138,15 +138,17 @@
     </section>
 
     <section class="group">
-      <label class="label" for="difficulty">Difficulty</label>
-      <select id="difficulty"
-              title="The engine always reads the position in full; a lower setting only makes it settle for a move near its best rather than the best">
-        <option value="beginner">Beginner</option>
-        <option value="casual">Casual</option>
-        <option value="club">Club</option>
-        <option value="strong">Strong</option>
-        <option value="full" selected>Full</option>
-      </select>
+      <label class="label" for="difficulty">Difficulty <span class="dial-value" id="difficultyValue">100</span></label>
+      <input type="range" id="difficulty" min="0" max="100" step="1" value="100"
+             title="The engine always reads the position in full; lower settings make it settle for a move near its best rather than the best">
+      <div class="dial-ticks" id="difficultyTicks">
+        <button type="button" class="dial-tick" data-value="0" style="left:0%">Beginner</button>
+        <button type="button" class="dial-tick" data-value="20" style="left:20%">Casual</button>
+        <button type="button" class="dial-tick" data-value="60" style="left:60%">Club</button>
+        <button type="button" class="dial-tick" data-value="80" style="left:80%">Strong</button>
+        <button type="button" class="dial-tick" data-value="100" style="left:100%">Full</button>
+      </div>
+      <div class="dial-ends"><span>Longer game</span><span>Shortest win</span></div>
       <p class="hint-note" id="difficultyNote"></p>
     </section>
 
