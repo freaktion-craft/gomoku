@@ -380,6 +380,10 @@ class Rapfi {
     return { points };
   }
 
+  /* RESTART resets the board but keeps the hash table, so a new game on a familiar opening
+     would start with the last game's search results already in memory: the engine plays
+     it better the second time, and every measurement that replays openings (colour-swapped
+     pairs) comes out skewed. YXHASHCLEAR empties the hash, so each game starts cold. */
   async newGame() {
     if (!this.proc) return;
     try {
@@ -388,6 +392,7 @@ class Rapfi {
       // Not fatal: every move is sent as a full BOARD, so state cannot drift.
       broadcast('engine', 'restart failed: ' + err.message);
     }
+    try { this.send('YXHASHCLEAR'); } catch (e) { /* the process went away; it starts cold anyway */ }
   }
 
   stop() {
