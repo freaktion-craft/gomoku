@@ -1096,15 +1096,37 @@
     });
     if (state.games.length > HISTORY_MAX) state.games.length = HISTORY_MAX;
     saveGames();
+  }
 
-    // The bridge keeps every finished game in its game log, whatever History later drops.
-    if (backend.kind === 'rapfi') {
-      fetch('api/log', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(liveRecord())
-      }).catch(function () { /* the log is best effort; History still has the game */ });
+  /* ---- game log ----------------------------------------------------------
+     The bridge keeps every game in its game log (server.js), whatever History later
+     drops: finished games the moment they end, and games left unfinished when a new one
+     starts, the rule, opponent or board size changes, or the page closes, since an
+     abandoned game is part of the record too. Games of fewer than LOG_MIN_MOVES moves are
+     skipped. `loggedKey` remembers the last thing sent, so a finished game is not logged
+     again as unfinished when the next one starts. On close the record goes by
+     sendBeacon, which the browser delivers after the page is gone. */
+  var LOG_MIN_MOVES = 4;
+
+  function sendToLog(onClose) {
+    if (backend.kind !== 'rapfi') return;
+    var record = liveRecord();
+    if (record.moves.length < LOG_MIN_MOVES) return;
+    var key = [record.size, record.rule, record.result]
+      .concat(record.moves.map(function (m) { return m.x + ',' + m.y; })).join(' ');
+    if (key === state.loggedKey) return;
+    state.loggedKey = key;
+    var body = JSON.stringify(record);
+    if (onClose && navigator.sendBeacon) {
+      navigator.sendBeacon('api/log', new Blob([body], { type: 'application/json' }));
+      return;
     }
+    fetch('api/log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: body,
+      keepalive: true
+    }).catch(function () { /* the log is best effort; History still has finished games */ });
   }
 
   function resultText(game) {
@@ -1293,8 +1315,8 @@
     var moves = isReplaying() ? state.replay.saved.moves : board.history;
     return gameRecord(moves, live.grades, live.shapes, {
       size: isReplaying() ? state.replay.saved.size : SIZE,
-      rule: els.rule.value,
-      mode: els.mode.value,
+      rule: state.playRule || els.rule.value,
+      mode: state.playMode || els.mode.value,
       difficulty: difficulty().value,
       result: live.over ? (live.winner ? sideName(live.winner) : 'draw') : 'unfinished'
     });
@@ -2112,7 +2134,10 @@
     } else {
       state.turn = 3 - player;
     }
-    if (state.over) recordGame();
+    if (state.over) {
+      sendToLog();
+      recordGame();
+    }
     render();
     return true;
   }
@@ -2179,6 +2204,10 @@
   }
 
   function newGame() {
+    // The game being replaced may be unfinished; it still goes in the log. Its rule and
+    // opponent are the ones it was started with, since the controls may already show the
+    // next game's.
+    sendToLog();
     cancelReview();
     clearDemoTimer();
     state.demoPaused = false;
@@ -2192,6 +2221,8 @@
     state.over = false;
     state.winner = 0;
     state.winLine = null;
+    state.playRule = els.rule.value;
+    state.playMode = els.mode.value;
     state.thinking = false;
     state.hint = -1;
     state.grades = [];
@@ -2679,6 +2710,9 @@
   window.addEventListener('blur', cancelHold);
 
   window.addEventListener('resize', resize);
+
+  // A game still on the board when the page closes goes in the log as unfinished.
+  window.addEventListener('pagehide', function () { sendToLog(true); });
   if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas);
 
   /* ---- theme -------------------------------------------------------------

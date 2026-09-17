@@ -576,9 +576,13 @@ is a record, not a screenshot.
 
 ## Game log
 
-Every finished game is also kept by the bridge, whether or not it is ever
-exported. When a game ends, the page posts its record, in the same shape as
-Export JSON, to `/api/log`. The bridge appends it as one line to
+Every game is also kept by the bridge, whether or not it is ever exported. The
+moment a game ends, the page posts its record, in the same shape as Export
+JSON, to `/api/log`. A game left unfinished is posted too, with result
+`unfinished`. That covers starting a new game, changing the rule, opponent or
+board size mid-game, and closing the page, which sends it by `sendBeacon`. An
+abandoned game is part of the record. Games of fewer than 4 moves are skipped,
+and an unfinished game keeps the rule and opponent it was started with. The bridge appends it as one line to
 `data/games/<yyyy-mm-dd>.jsonl`. Each line starts with an `id`: the UTC time the
 game was saved plus a hash of the board size, rule and moves, for example
 `20260917T095125Z-98066e4385`. The same game posted twice is recognised and not
