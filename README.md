@@ -7,18 +7,21 @@ engine process.
 
 ## Getting the engine
 
-The Rapfi binaries are not in this repository. They are a 51 MB third-party
-release under GPL-3.0, so the project fetches them instead of redistributing
-them. Run this once after cloning:
+On Windows there is nothing to fetch: the Rapfi Windows builds, the NNUE weights
+and `config.toml` are in `engine/`, about 50 MB, unchanged from Rapfi release
+250615.
+
+The macOS and Linux builds are not in this repository. Run this once after
+cloning:
 
 ```
-get-engine.cmd      Windows
 ./get-engine.sh     macOS and Linux
 ```
 
 It downloads release 250615 from the Rapfi project and unpacks the build for
-your platform, the NNUE weights and `config.toml` into `engine/`. Without it the
-page still runs, but falls back to the small built-in engine.
+your platform into `engine/`. Without a build for your platform the page still
+runs, but falls back to the small built-in engine. `get-engine.cmd` does the
+same for Windows, should `engine/` ever need restoring.
 
 ## Running it
 
@@ -108,9 +111,9 @@ engine/           Rapfi 0.43.01, from release 250615
 [250615 release](https://github.com/dhbloo/rapfi/releases/tag/250615). That archive
 carries five Windows builds, five Linux builds and one macOS build, plus the NNUE
 weights (`mix9svq*.bin.lz4`), the classical weights (`model210901.bin`) and
-`config.toml`. The fetch scripts take only the builds for the platform they run
-on. Rapfi needs the weights and config beside the executable, so keep the folder
-together.
+`config.toml`. The repository carries the Windows builds, and the fetch scripts
+take only the builds for the platform they run on. Rapfi needs the weights and
+config beside the executable, so keep the folder together.
 
 ## Instruction-set builds
 
@@ -708,8 +711,11 @@ fullscreen still covers it; borderless windowed does not.
 
 ## Licensing
 
-Rapfi is by dhbloo and is licensed GPL-3.0. It is not included here; 
-get-engine.cmd downloads it from the project’s own releases.
+Rapfi is by dhbloo and is licensed GPL-3.0. The files in `engine/` are its
+unmodified 250615 release, and `engine/Copying.txt` is its licence. The source
+for those binaries is the
+[250615 tag](https://github.com/dhbloo/rapfi/tree/250615) of the Rapfi
+repository.
 
 The code in this repository talks to Rapfi as a separate process over its
 stdin and stdout using the published Piskvork protocol. It does not link

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Downloads the Rapfi release this project drives and unpacks the build for this
-# platform, its weights and its config into engine/. Rapfi is GPL-3.0 and is not
+# platform, its weights and its config into engine/. Only the Windows builds are
 # committed to this repository; see README.md. Windows has get-engine.cmd.
 set -eu
 cd "$(dirname "$0")"

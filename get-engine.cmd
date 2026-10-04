@@ -1,7 +1,7 @@
 @echo off
 rem Downloads the Rapfi release this project drives and unpacks the Windows
-rem build, its weights and its config into engine\. Rapfi is GPL-3.0 and is not
-rem committed to this repository; see README.md.
+rem build, its weights and its config into engine\. Those files are committed to
+rem this repository, so this is only needed to restore them; see README.md.
 setlocal
 cd /d "%~dp0"
 

@@ -1,6 +1,6 @@
-# Rapfi itself is not committed: it is a 51 MB third-party GPL-3.0 release.
-# Run get-engine.cmd to download and unpack it.
-engine/
+# The Windows Rapfi builds, weights and config in engine/ are committed. This
+# file is the per-machine result of probing which build the CPU can run.
+engine/selected-build.json
 
 *.log
 Thumbs.db
